@@ -117,16 +117,10 @@ class Node:
         return None
 
 
+
 # processor helper
 class Processor:
     """Helper class which does all transformation work"""
-
-    SORTING = False
-
-    class Colors:
-        SECTION_0 = '#DEEAF2'
-        TOTAL     = '#F2EFED'
-        FINAL     = '#E9DFDB'
 
     import re
     RE_ESTIMATE = re.compile("estimate\\s*=(\\s*\\d+\\s*)[/](\\s*\\d+\\s*)[/](\\s*\\d+\\s*)")
@@ -139,19 +133,40 @@ class Processor:
         'impl': ('comment', '')
     }
 
+    @staticmethod
+    def _loadTheme(path):
+        if (path is not None):
+            import importlib
+            module = importlib.load_module(path)
+            theme = module.Theme
+            if (theme is not None): return theme
+
+        class Theme:
+            SECTION_0 = '#DEEAF2'
+            TOTAL     = '#F2EFED'
+            FINAL     = '#E9DFDB'
+
+        return Theme
+
+    #
+    def __init__(self, options):
+        self._sorting = options.sorting and True or False
+        self._theme = Processor._loadTheme(options.theme)
+        self._p99 = options.p99 and True or False
 
     @staticmethod
     def _text(xmlNode):
+        # TODO: case insensitive attributes
         return xmlNode.getAttribute('TEXT') # xmind style for attributes
 
-    @staticmethod
-    def _process(parent, xmlNodes):
+    #
+    def _process(self, parent, xmlNodes):
         required = 0
 
         xmlNodes = [ n for n in xmlNodes if n.nodeType == n.ELEMENT_NODE ]
         xmlNodes = [ n for n in xmlNodes if n.tagName == 'node' ]
 
-        if (Processor.SORTING):
+        if (self._sorting):
             xmlNodes.sort(lambda x, y: cmp(Processor._text(x), Processor._text(y)))
 
         for xmlNode in xmlNodes:
@@ -182,7 +197,7 @@ class Processor:
 
             # else
             node = Node(parent, title)
-            node = Processor._process(node, xmlNode.childNodes)
+            node = self._process(node, xmlNode.childNodes)
             if (node is not None):
                 parent.append(node)
                 required = 1
@@ -190,9 +205,8 @@ class Processor:
         if (required): return parent
         return None
 
-
-    @staticmethod
-    def parse(path):
+    # 
+    def parse(self, path):
 
         # parse mm document
         from xml.dom import minidom
@@ -202,26 +216,25 @@ class Processor:
 
         # transform document to nodelist
         root = Node(None, "root")
-        root = Processor._process(root, xmlmap.childNodes)
+        root = self._process(root, xmlmap.childNodes)
         return root
 
-    @staticmethod
-    def _collect(root):
-        """ it collects the given hierarchy to list of lines """
-        lines = []
-        def _collectChilds(node):
-            for n in node.childs():
-                lines.append(n)
-                _collectChilds(n)
-        _collectChilds(root)
-        return lines
-
-
-    @staticmethod
-    def _report(root, wb):
+    #
+    def _report(self, root, wb):
+        # see https://en.wikipedia.org/wiki/Three-point_estimation
 
         # first transform tree to lines
-        lines = Processor._collect(root)
+        def _collect(root):
+            """ it collects the given hierarchy to list of lines """
+            lines = []
+            def _collectChilds(node):
+                for n in node.childs():
+                    lines.append(n)
+                    _collectChilds(n)
+            _collectChilds(root)
+            return lines
+
+        lines = _collect(root)
 
         # helper functions
         cell = lambda a, b: "%s%s" % (a, (1+b))
@@ -241,12 +254,12 @@ class Processor:
         f_numbers = format({'bold': True, 'num_format': '0.00'})
         f_comment = format({'text_wrap': True})
 
-        f_section_0 = format({'bold': True, 'bg_color': Processor.Colors.SECTION_0})
+        f_section_0 = format({'bold': True, 'bg_color': self._theme.SECTION_0})
         f_section_1 = format({'italic': True, 'text_wrap': True})
 
-        f_total           = format({'bold': True, 'bg_color': Processor.Colors.TOTAL})
-        f_total_numbers   = format({'bold': True, 'bg_color': Processor.Colors.TOTAL, 'num_format': '0.00'})
-        f_final_numbers   = format({'bold': True, 'bg_color': Processor.Colors.FINAL, 'num_format': '0.00'})
+        f_total           = format({'bold': True, 'bg_color': self._theme.TOTAL})
+        f_total_numbers   = format({'bold': True, 'bg_color': self._theme.TOTAL, 'num_format': '0.00'})
+        f_final_numbers   = format({'bold': True, 'bg_color': self._theme.FINAL, 'num_format': '0.00'})
 
         # create & init sheet
         wb_sheet = wb.add_worksheet()
@@ -271,8 +284,8 @@ class Processor:
         wb_sheet.write_string(cell('G', row), 'Max', f_header)             # G: estimate
         wb_sheet.write_string(cell('H', row), '', f_header)                # H: empty
         wb_sheet.write_string(cell('I', row), 'Avg', f_header)             # I: weighted mean
-        wb_sheet.write_string(cell('J', row), 'Range', f_header)           # J: weighted diff
-        wb_sheet.write_string(cell('K', row), 'Sq', f_header)              # K: squared diff
+        wb_sheet.write_string(cell('J', row), 'SD', f_header)              # J: standard deviation
+        wb_sheet.write_string(cell('K', row), 'Sq', f_header)              # K: squared deviation
 
         # lines
         roles_rows = {}
@@ -292,7 +305,7 @@ class Processor:
                 role_rows.append(row)
 
             row_options = {}
-            if (role): 
+            if (role):
                 row_options['hidden'] = True
                 row_options['collapsed'] = True
             wb_sheet.set_row(row, options=row_options)
@@ -318,8 +331,8 @@ class Processor:
 
                 if (not role):
                     wb_sheet.write_formula(cell('I', row), '=(%s+4*%s+%s)/6' % (cell('E', row), cell('F', row), cell('G', row)), f_numbers) # I (weighted mean)
-                    wb_sheet.write_formula(cell('J', row), '=(%s-%s)/6' % (cell('G', row), cell('E', row)), f_numbers)                      # J (weighted diff)
-                    wb_sheet.write_formula(cell('K', row), '=%s*%s' % (cell('J', row), cell('J', row)), f_numbers)                          # K (squared diff)
+                    wb_sheet.write_formula(cell('J', row), '=(%s-%s)/6' % (cell('G', row), cell('E', row)), f_numbers)                      # J (standard deviation)
+                    wb_sheet.write_formula(cell('K', row), '=%s*%s' % (cell('J', row), cell('J', row)), f_numbers)                          # K (squared deviation)
 
         # total
         row_lines = (row_lines[0], row_lines[-1])
@@ -374,56 +387,84 @@ class Processor:
         # one extra line
         row_footer += 1
 
-        # sigma
+        # sigma: standard deviation
         row_footer += 1
         row_sigma = row_footer
-        wb_sheet.write_string(cell('A', row_sigma), 'Sigma', f_bold)                                   # A (caption)
+        wb_sheet.write_string(cell('A', row_sigma), 'Standard deviation', f_bold)                      # A (caption)
         wb_sheet.write_formula(cell('C', row_sigma), '=SQRT(%s)' % (cell('K', row_total)), f_numbers)  # C (sigma)
 
-        # kappa
+        # kappa: correction factor
         row_footer += 1
         row_kappa = row_footer
         wb_sheet.write_string(cell('A', row_kappa), 'K', f_bold)     # A (caption)
         wb_sheet.write_number(cell('C', row_kappa), 1.5, f_numbers)  # C (kappa)
 
-        # Min (P=95%)
+        if self._p99:
+            # P=99%, super precision
+            p_title = "P=99%"
+            p_multiplier = 3
+        else:
+            # P=95%, regular precision
+            p_title = "P=95%"
+            p_multiplier = 2
+
+        # Min (P=95/99%)
         row_footer += 1
-        wb_sheet.write_string(cell('A', row_footer), 'Min (P=95%)', f_total)                     # A (caption)
-        wb_sheet.write_string(cell('B', row_footer), '', f_total)                                # B
-        wb_sheet.write_formula(cell('C', row_footer), '=%s-3*%s' % (cell('I', row_total), cell('C', row_sigma)), f_total_numbers)  # C (min)
-        wb_sheet.write_formula(cell('D', row_footer), '=%s*%s' % (cell('C', row_footer), cell('C', row_kappa)),  f_final_numbers)  # D (modified)
+        wb_sheet.write_string(cell('A', row_footer), 'Min (%s)' % p_title, f_total)  # A (caption)
+        wb_sheet.write_string(cell('B', row_footer), '', f_total)                    # B
+        wb_sheet.write_formula(cell('C', row_footer), '=%s-%s*%s' % (cell('I', row_total), p_multiplier, cell('C', row_sigma)), f_total_numbers)  # C (min)
+        wb_sheet.write_formula(cell('D', row_footer), '=%s*%s' % (cell('C', row_footer), cell('C', row_kappa)),  f_final_numbers)                 # D (modified)
 
-        # Max (P=95%)
+        # Max (P=95/99%)
         row_footer += 1
-        wb_sheet.write_string(cell('A', row_footer), 'Min (P=95%)', f_total)                     # A (caption)
-        wb_sheet.write_string(cell('B', row_footer), '', f_total)                                # B
-        wb_sheet.write_formula(cell('C', row_footer), '=%s+3*%s' % (cell('I', row_total), cell('C', row_sigma)), f_total_numbers)  # C (min)
-        wb_sheet.write_formula(cell('D', row_footer), '=%s*%s' % (cell('C', row_footer), cell('C', row_kappa)),  f_final_numbers)  # D (modified)
+        wb_sheet.write_string(cell('A', row_footer), 'Min (%s)' % p_title, f_total)  # A (caption)
+        wb_sheet.write_string(cell('B', row_footer), '', f_total)                    # B
+        wb_sheet.write_formula(cell('C', row_footer), '=%s+%s*%s' % (cell('I', row_total), p_multiplier, cell('C', row_sigma)), f_total_numbers)  # C (min)
+        wb_sheet.write_formula(cell('D', row_footer), '=%s*%s' % (cell('C', row_footer), cell('C', row_kappa)),  f_final_numbers)                 # D (modified)
 
-
-    @staticmethod
-    def report(root, path):
-        # create a report
+    # create a report
+    def report(self, root, path):
         import xlsxwriter
         with xlsxwriter.Workbook(path + '.xlsx') as wb:
-            Processor._report(root, wb)
+            self._report(root, wb)
 
 # let's dance
 if __name__ == "__main__":
 
-    import getopt
-    usage = 'Usage: estimate.py mindmapfile.mm'
+    import argparse
 
-    if (len(sys.argv) < 2):
-        print usage
-        sys.exit(-1)
+    parser = argparse.ArgumentParser(description='Converts freemind estimation to xlsx report.')
 
-    opts, args = getopt.getopt(sys.argv[1:], 'b')
-    if len(args) not in (0, 1, 2):
-        print usage
-        sys.exit(1)
+    parser.add_argument(
+        '--sort', '-s',
+        action='store_true',
+        dest='sorting',
+        help='sort children nodes by title'
+    )
 
-    filename = args[0]
-    root = Processor.parse(filename)
-    Processor.report(root, filename)
+    parser.add_argument(
+        '--theme',
+        action='store',
+        dest='theme',
+        help='use a given .py file as a theme'
+    )
+
+    parser.add_argument(
+        '--p99',
+        action='store_true',
+        dest='p99',
+        help='Use P=99%% instead of P=95%%'
+    )
+
+    parser.add_argument(
+        'filename',
+        help='a freemind (mindmap) file to be converted'
+    )
+
+    options = parser.parse_args()
+    filename = options.filename
+
+    processor = Processor(options)
+    root = processor.parse(filename)
+    processor.report(root, filename)
 
