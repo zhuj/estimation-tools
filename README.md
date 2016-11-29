@@ -2,6 +2,7 @@
 
 
 It could help you to estimate a scope of work with [Work breakdown structure](https://en.wikipedia.org/wiki/Work_breakdown_structure "Work breakdown structure") and [Three-point estimation](https://en.wikipedia.org/wiki/Three-point_estimation "Three-point estimation").
+
 See [Project Wiki](https://github.com/zhuj/estimation-tools/wiki "Wiki") for more details.
 
 *** 

@@ -1,0 +1,16 @@
+usage: estimate.py [-h] [--sort] [--theme THEME] [--p99] [--no-roles]
+                   [-o OUTPUT]
+                   filename
+
+Converts freemind estimation to xlsx report.
+
+positional arguments:
+  filename       a freemind (mindmap) file to be converted
+
+optional arguments:
+  -h, --help     show this help message and exit
+  --sort, -s     sort children nodes by title
+  --theme THEME  use a given .py file as a theme
+  --p99          use P=99% instead of P=95%
+  --no-roles     don't provide estimation details for each role
+  -o OUTPUT      out file name
