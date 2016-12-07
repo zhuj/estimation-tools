@@ -22,9 +22,13 @@
 """
 """
 
-import sys
-reload(sys)
-sys.setdefaultencoding('utf-8')
+# magic (hack), also it's possible to use export PYTHONIOENCODING=utf8
+try:
+    import sys
+    reload(sys) # reload makes sys.setdefaultencoding method accessible
+    sys.setdefaultencoding('utf-8')
+except:
+    pass
 
 # estimatuion
 class Estimation:
@@ -73,11 +77,17 @@ class Node:
         self._childs = []
         self._estimations = {}
 
-    def title(self): return self._title
+    def title(self):
+        return self._title
 
-    def is_role(self): return ((self._title[0] == '(') and (self._title[-1] == ')'))
+    def is_role(self):
+        return ((self._title[0] == '(') and (self._title[-1] == ')'))
 
-    def level(self): return self._level
+    def level(self):
+        return self._level
+
+    def title_with_level(self):
+        return (('  ' * self.level()) + self.title())
 
     def parent(self, level=None):
         if (level is None): return self._parent
@@ -117,6 +127,137 @@ class Node:
         return None
 
 
+# default theme (theme wrapper)
+class Theme:
+    """It wraps given object and looks into it for values: it will use default value it nothing is found.""" 
+
+    DEFAULT_SECTION_0 = '#DEEAF2'
+    DEFAULT_SECTION_1 = None
+
+    DEFAULT_TOTAL     = '#F2EFED'
+    DEFAULT_FINAL     = '#E9DFDB'
+    DEFAULT_ROLE      = '#7f7f7f'
+
+    # default base style
+    DEFAULT_F_DEFAULT = {
+        'font_name': 'Arial',
+        'font_size': 10,
+        'valign': 'top'
+    }
+
+    # default header format
+    DEFAULT_F_HEADER = {
+        'bold': True,
+        'bottom': 1,
+        'text_wrap': True
+    }
+
+    # default cation format
+    DEFAULT_F_CAPTION = {
+        'bold': True
+    }
+
+    # default number format
+    DEFAULT_F_NUMBERS = {
+        'num_format': '0.00'
+    }
+
+    # default number format
+    DEFAULT_F_ESTIMATES = lambda self: self._merge_format(self.F_NUMBERS, {
+        'bold': True
+    })
+
+    # comment row
+    DEFAULT_F_COMMENT = {
+        'text_wrap': True
+    }
+
+    # roles (temporary) row caption
+    DEFAULT_F_ROLE_ROW = lambda self: {
+        'font_color': self.ROLE
+    }
+
+    # 2nd level sections
+    DEFAULT_F_SECTION_1 = lambda self: {
+        'italic': True,
+        'text_wrap': True,
+        'bg_color': self.SECTION_1
+    }
+
+    # 1st level (root) sections
+    DEFAULT_F_SECTION_0 = lambda self: {
+        'bold': True,
+        'text_wrap': True,
+        'bg_color': self.SECTION_0
+    }
+
+    # total row
+    DEFAULT_F_TOTAL = lambda self: {
+        'bold': True,
+        'bg_color': self.TOTAL
+    }
+
+    # final values
+    DEFAULT_F_FINAL = lambda self: {
+        'bold': True,
+        'bg_color': self.FINAL
+    }
+
+    def __init__(self, obj):
+        self._obj = obj
+
+    def __getattr__(self, attr):
+        v = getattr(self._obj, attr, None)
+        if (v is None):
+            v = getattr(Theme, 'DEFAULT_' + attr)
+
+        if (callable(v)): v = v(self)
+        return v
+
+    def _merge_format(self, *formats):
+        result = {}
+        for f in formats:
+            if (callable(f)): f = f(self)
+            if (not f): continue
+            result.update(f)
+        return { k:v for k,v in result.items() if v is not None }
+
+    def format(self, opts = {}):
+        return self._merge_format(self.F_DEFAULT, opts)
+
+# format cache
+class FormatCache:
+    """It wraps current theme and call format registration only for completely new format combination"""
+
+    def __init__(self, theme, register):
+        self._cache = {}
+        self._theme = theme
+        self._register = register
+
+    @staticmethod
+    def _key(format):
+        items = format.items()
+        items.sort()
+        return tuple(items)
+
+    @staticmethod
+    def _merge(*formats):
+        result = {}
+        for f in formats:
+            if (not f): continue
+            result.update(f)
+        return result
+
+    def get(self, *formats):
+        format = FormatCache._merge(*formats)
+        key = FormatCache._key(format)
+        val = self._cache.get(key, None)
+        if (val is None):
+            format = self._theme.format(format)
+            self._cache[key] = val = self._register(format)
+
+        return val
+
 
 # processor helper
 class Processor:
@@ -135,18 +276,14 @@ class Processor:
 
     @staticmethod
     def _loadTheme(path):
+        theme = None
         if (path is not None):
             import importlib
             module = importlib.import_module(path)
             theme = module.Theme
-            if (theme is not None): return theme
 
-        class Theme:
-            SECTION_0 = '#DEEAF2'
-            TOTAL     = '#F2EFED'
-            FINAL     = '#E9DFDB'
-
-        return Theme
+        if (theme is None): theme = object() # just an empty object
+        return Theme(theme)
 
     #
     def __init__(self, options):
@@ -154,6 +291,7 @@ class Processor:
         self._theme = Processor._loadTheme(options.theme)
         self._p99 = options.p99 and True or False
         self._roles = options.roles and True or False
+        self._formulas = self._roles and (options.formulas and True or False)
 
     @staticmethod
     def _text(xmlNode):
@@ -242,50 +380,47 @@ class Processor:
 
         lines = _collect(root)
 
+        # cell format cache
+        _cf_cache = FormatCache(self._theme, lambda f: wb.add_format(f))
+
         # helper functions
         cell = lambda a, b: "%s%s" % (a, (1+b))
         cells = lambda a, b: "%s:%s" % (cell(a, b[0]), cell(a, b[1]))
-        format = lambda opts: wb.add_format(dict(opts, **{
-            'font_name': 'Arial',
-            'font_size': 10,
-            'valign': 'top'
-        }))
+
+        _column = lambda c, width, f=None, options={}: wb_sheet.set_column('%s:%s' % (c, c), width=width, cell_format=_cf_cache.get(f), options=options)
+        _string = lambda c, r, string, *f: wb_sheet.write_string(cell(c, r), string, cell_format = _cf_cache.get(*f))
+        _number = lambda c, r, number, *f: wb_sheet.write_number(cell(c, r), number, cell_format = _cf_cache.get(self._theme.F_NUMBERS, *f))
+        _formula = lambda c, r, formula, *f: wb_sheet.write_formula(cell(c, r), formula, cell_format = _cf_cache.get(self._theme.F_NUMBERS, *f))
 
         # init format (style) table
-        f_default = format({})
-
-        f_header  = format({'bold': True, 'bottom': 1, 'text_wrap': True })
-
-        f_bold    = format({'bold': True })
-        f_numbers = format({'bold': True, 'num_format': '0.00'})
-        f_comment = format({'text_wrap': True})
-
-        f_section_0 = format({'bold': True, 'bg_color': self._theme.SECTION_0})
-        f_section_1 = format({'italic': True, 'text_wrap': True})
-
-        f_total           = format({'bold': True, 'bg_color': self._theme.TOTAL})
-        f_total_numbers   = format({'bold': True, 'bg_color': self._theme.TOTAL, 'num_format': '0.00'})
-        f_final_numbers   = format({'bold': True, 'bg_color': self._theme.FINAL, 'num_format': '0.00'})
+        f_caption = self._theme.F_CAPTION
+        f_comment = self._theme.F_COMMENT
+        f_estimates = self._theme.F_ESTIMATES
+        f_role = self._theme.F_ROLE_ROW
+        f_total = self._theme.F_TOTAL
+        f_final = self._theme.F_FINAL
 
         # create & init sheet
         wb_sheet = wb.add_worksheet()
 
-        _string = lambda c, r, string, f=None: wb_sheet.write_string(cell(c, r), string, cell_format = f)
-        _number = lambda c, r, number, f=None: wb_sheet.write_number(cell(c, r), number, cell_format = f)
-        _formula = lambda c, r, formula, f=None: wb_sheet.write_formula(cell(c, r), formula, cell_format = f)
-
-
-        # columns
-        wb_sheet.set_column('A:A',  width=40, cell_format=f_default)
-        wb_sheet.set_column('B:B',  width=3,  cell_format=f_default, options={'hidden': True})
-        wb_sheet.set_column('C:C',  width=6,  cell_format=f_comment)
-        wb_sheet.set_column('D:D',  width=50, cell_format=f_default)
-        wb_sheet.set_column('E:K',  width=7,  cell_format=f_numbers)
+        # setup columns
+        _column('A', width=40, f=self._theme.F_DEFAULT)
+        _column('B', width=3,  f=self._theme.F_DEFAULT, options={'hidden': True})
+        _column('C', width=6,  f=self._theme.F_DEFAULT)
+        _column('D', width=50, f=self._theme.F_COMMENT)
+        _column('E', width=7,  f=self._theme.F_NUMBERS)
+        _column('F', width=7,  f=self._theme.F_NUMBERS)
+        _column('G', width=7,  f=self._theme.F_NUMBERS)
+        _column('H', width=7,  f=self._theme.F_DEFAULT)
+        _column('I', width=7,  f=self._theme.F_NUMBERS)
+        _column('J', width=7,  f=self._theme.F_NUMBERS)
+        _column('K', width=7,  f=self._theme.F_NUMBERS)
 
         # start rows
         row = 0
 
         # header (row = 1)
+        f_header = self._theme.F_HEADER
         _string('A', row, 'Task / Subtask', f_header)  # A: caption
         _string('B', row, '', f_header)                # B: hidden
         _string('C', row, '', f_header)                # C: empty
@@ -300,7 +435,7 @@ class Processor:
 
         # lines
         roles_rows = {}
-        row_lines = []
+        row_lines = {}
         for l in lines:
 
             # first, remove all empty lines
@@ -312,55 +447,111 @@ class Processor:
 
             # let's start
             row += 1
-            row_lines.append(row)
+            row_lines[id(l)] = row
 
             # obtain estimations for the row (total, aggregated from the node and its roles)
             estimates = l.estimates()
 
-            # collect roles rows, if roles are required
-            if (role and self._roles):
+            # ----------------------
+            # special case for roles (they are just info rows)
+            if (role):
+
+                # collect roles rows, if roles are required
                 role_rows = roles_rows.get(l.title(), None)
                 if role_rows is None:
                     roles_rows[l.title()] = role_rows = []
                 role_rows.append(row)
 
-            # calculate and apply a style for row
-            row_options = {}
-            if (role):
-                row_options['hidden'] = True
-                row_options['collapsed'] = True
-            wb_sheet.set_row(row, options=row_options)
+                # set row options (hide it)
+                wb_sheet.set_row(row, options={
+                    'hidden': True,
+                    'collapsed': True
+                })
 
-            # do so with cell format for the title
-            cell_format = None
-            if (0 == l.level()):
-                cell_format=f_section_0
-            elif (1 == l.level()):
-                if (estimates is None):
-                    cell_format=f_section_1
+                # fill with values
+                _string('A', row, l.title_with_level(), f_role)  # A (title)
+                _number('B', row, 0, f_role)                     # B (visibility/multiplier)
+                _string('C', row, '', f_role)                    # C (empty)
+                _string('D', row, '', f_role)                    # D (comment)
+                if (estimates is not None):
+                    _number('E', row, estimates[0], f_role)      # E (estimate)
+                    _number('F', row, estimates[1], f_role)      # F (estimate)
+                    _number('G', row, estimates[2], f_role)      # G (estimate)
+
+                continue
+
+            # ---------------
+            # not a role case (visible rows, main data)
+
+            # determine row format (and store them to current line)
+            f_row = None
+            if (estimates is None):
+                if (0 == l.level()):
+                    f_row = self._theme.F_SECTION_0
+                elif (1 == l.level()):
+                    f_row = self._theme.F_SECTION_1
+
+            l._f_row = f_row
 
             # multiplier will be used in SUMPRODUCT formulas:
             # true means it's a raw data for formulas - we have to use it
             multiplier = (not role) and (estimates is not None)
 
             # let's fill the row with data
-            _string('A', row, '%s' % (('  ' * l.level()) + l.title()), cell_format)  # A (title)
-            _number('B', row, (multiplier and 1 or 0), cell_format)                  # B (visibility/multiplier)
-            _string('C', row, '', cell_format)                                       # C (empty)
-            _string('D', row, ';\n'.join(l.annotation('comment')), f_comment)        # D (comment)
+            _string('A', row, l.title_with_level(), f_row)                                  # A (title)
+            _number('B', row, (multiplier and 1 or 0), f_row)                               # B (visibility/multiplier)
+            _string('C', row, '', f_row)                                                    # C (empty)
+            _string('D', row, ';\n'.join(l.annotation('comment')), f_row, f_comment)        # D (comment)
+            _string('E', row, '', f_row)                                                    # E (estimate)
+            _string('F', row, '', f_row)                                                    # F (estimate)
+            _string('G', row, '', f_row)                                                    # G (estimate)
+            _string('H', row, '', f_row)                                                    # H (empty)
+            _string('I', row, '', f_row)                                                    # I (estimate)
+            _string('J', row, '', f_row)                                                    # J (estimate)
+            _string('K', row, '', f_row)                                                    # K (estimate)
 
             if (estimates is not None):
-                _number('E', row, estimates[0], f_numbers)               # E (estimate)
-                _number('F', row, estimates[1], f_numbers)               # F (estimate)
-                _number('G', row, estimates[2], f_numbers)               # G (estimate)
+                _number('E', row, estimates[0], f_row, f_estimates)               # E (estimate)
+                _number('F', row, estimates[1], f_row, f_estimates)               # F (estimate)
+                _number('G', row, estimates[2], f_row, f_estimates)               # G (estimate)
+                _formula('I', row, '=(%s+4*%s+%s)/6' % (cell('E', row), cell('F', row), cell('G', row)), f_row, f_estimates) # I (weighted mean)
+                _formula('J', row, '=(%s-%s)/6' % (cell('G', row), cell('E', row)), f_row, f_estimates)                      # J (standard deviation)
+                _formula('K', row, '=%s*%s' % (cell('J', row), cell('J', row)), f_row, f_estimates)                          # K (squared deviation)
 
-                if (not role):
-                    _formula('I', row, '=(%s+4*%s+%s)/6' % (cell('E', row), cell('F', row), cell('G', row)), f_numbers) # I (weighted mean)
-                    _formula('J', row, '=(%s-%s)/6' % (cell('G', row), cell('E', row)), f_numbers)                      # J (standard deviation)
-                    _formula('K', row, '=%s*%s' % (cell('J', row), cell('J', row)), f_numbers)                          # K (squared deviation)
 
+        # -------------------------------------
+        # change estimation numbers to formulas
+        if (self._formulas):
+            for l in lines:
+                if (not l): continue
+                if (l.is_role()): continue
+                if (not l.childs()): continue
+
+                l_row = row_lines[id(l)]
+
+                template = "=0"
+                for c in l.childs():
+                    c_row = row_lines[id(c)]
+                    template += "+"+cell("#", c_row)
+
+                template = template.replace("=0+", "=")
+
+                f_row = l._f_row
+                if (l.estimates()):
+                    _formula('E', l_row, template.replace('#', 'E'), f_row, f_estimates)  # E (estimate)
+                    _formula('F', l_row, template.replace('#', 'F'), f_row, f_estimates)  # F (estimate)
+                    _formula('G', l_row, template.replace('#', 'G'), f_row, f_estimates)  # G (estimate)
+                else:
+                    _formula('E', l_row, template.replace('#', 'E'), f_row, f_role) # E (estimate)
+                    _formula('F', l_row, template.replace('#', 'F'), f_row, f_role) # F (estimate)
+                    _formula('G', l_row, template.replace('#', 'G'), f_row, f_role) # G (estimate)
+
+
+
+        # ----------------
         # calculate ranges
-        row_lines = (row_lines[0], row_lines[-1])
+        row_lines = row_lines.values()
+        row_lines = (min(row_lines), max(row_lines))
         row_multiplier = cells('B', row_lines)
 
         # set up autofilters (in headers)
@@ -372,17 +563,17 @@ class Processor:
         # total values (it uses row_multiplier to avoid duuble calculations for roles)
         row_footer += 1
         row_total = row_footer
-        _string('A', row_total, 'Total', f_total)                                                                   # A (caption)
-        _string('B', row_total, '', f_total)                                                                        # B (hidden)
-        _string('C', row_total, '', f_total)                                                                        # C
-        _string('D', row_total, '', f_total)                                                                        # D
-        _formula('E', row_total, '=SUMPRODUCT(%s,%s)' % (cells('E', row_lines), row_multiplier), f_total_numbers)   # E (sum)
-        _formula('F', row_total, '=SUMPRODUCT(%s,%s)' % (cells('F', row_lines), row_multiplier), f_total_numbers)   # F (sum)
-        _formula('G', row_total, '=SUMPRODUCT(%s,%s)' % (cells('G', row_lines), row_multiplier), f_total_numbers)   # G (sum)
-        _string('H', row_total, '', f_total)                                                                        # H
-        _formula('I', row_total, '=SUMPRODUCT(%s,%s)' % (cells('I', row_lines), row_multiplier), f_total_numbers)   # I (sum)
-        _formula('J', row_total, '=SUMPRODUCT(%s,%s)' % (cells('J', row_lines), row_multiplier), f_total_numbers)   # J (sum)
-        _formula('K', row_total, '=SUMPRODUCT(%s,%s)' % (cells('K', row_lines), row_multiplier), f_total_numbers)   # K (sum)
+        _string('A', row_total, 'Total', f_total)                                                                        # A (caption)
+        _string('B', row_total, '', f_total)                                                                             # B (hidden)
+        _string('C', row_total, '', f_total)                                                                             # C
+        _string('D', row_total, '', f_total)                                                                             # D
+        _formula('E', row_total, '=SUMPRODUCT(%s,%s)' % (cells('E', row_lines), row_multiplier), f_total, f_estimates)   # E (sum)
+        _formula('F', row_total, '=SUMPRODUCT(%s,%s)' % (cells('F', row_lines), row_multiplier), f_total, f_estimates)   # F (sum)
+        _formula('G', row_total, '=SUMPRODUCT(%s,%s)' % (cells('G', row_lines), row_multiplier), f_total, f_estimates)   # G (sum)
+        _string('H', row_total, '', f_total)                                                                             # H
+        _formula('I', row_total, '=SUMPRODUCT(%s,%s)' % (cells('I', row_lines), row_multiplier), f_total, f_estimates)   # I (sum)
+        _formula('J', row_total, '=SUMPRODUCT(%s,%s)' % (cells('J', row_lines), row_multiplier), f_total, f_estimates)   # J (sum)
+        _formula('K', row_total, '=SUMPRODUCT(%s,%s)' % (cells('K', row_lines), row_multiplier), f_total, f_estimates)   # K (sum)
 
         # total values for each role, if it's required
         if (self._roles):
@@ -394,19 +585,20 @@ class Processor:
                 role_num += 1
                 role_column = chr(ord('L') + role_num) # new column for each role, started from 'L'
 
-                wb_sheet.set_column('%s:%s' % (role_column, role_column), width=10, cell_format=f_default, options={'hidden': True})
+                _column(role_column, width=10, f=self._theme.F_DEFAULT, options={'hidden': True})
+
                 _string(role_column, 0, role, f_header)
                 for role_row in role_rows:
                     _number(role_column, role_row, 1)
 
                 role_multiplier = cells(role_column, row_lines)
-                _string('A', row_footer, '  - %s' % role.strip('()'), f_total)                                                 # A (caption)
-                _string('B', row_footer, '', f_total)                                                                          # B (hidden)
-                _string('C', row_footer, '', f_total)                                                                          # C
-                _string('D', row_footer, '', f_total)                                                                          # D
-                _formula('E', row_footer, '=SUMPRODUCT(%s,%s)' % (cells('E', row_lines), role_multiplier), f_total_numbers)    # E (sum)
-                _formula('F', row_footer, '=SUMPRODUCT(%s,%s)' % (cells('F', row_lines), role_multiplier), f_total_numbers)    # F (sum)
-                _formula('G', row_footer, '=SUMPRODUCT(%s,%s)' % (cells('G', row_lines), role_multiplier), f_total_numbers)    # G (sum)
+                _string('A', row_footer, '  - %s' % role.strip('()'), f_total)                                                   # A (caption)
+                _string('B', row_footer, '', f_total)                                                                            # B (hidden)
+                _string('C', row_footer, '', f_total)                                                                            # C
+                _string('D', row_footer, '', f_total)                                                                            # D
+                _formula('E', row_footer, '=SUMPRODUCT(%s,%s)' % (cells('E', row_lines), role_multiplier), f_total, f_estimates) # E (sum)
+                _formula('F', row_footer, '=SUMPRODUCT(%s,%s)' % (cells('F', row_lines), role_multiplier), f_total, f_estimates) # F (sum)
+                _formula('G', row_footer, '=SUMPRODUCT(%s,%s)' % (cells('G', row_lines), role_multiplier), f_total, f_estimates) # G (sum)
 
 
         # one extra line
@@ -415,14 +607,14 @@ class Processor:
         # sigma: standard deviation
         row_footer += 1
         row_sigma = row_footer
-        _string('A', row_sigma, 'Standard deviation', f_bold)                      # A (caption)
-        _formula('C', row_sigma, '=SQRT(%s)' % (cell('K', row_total)), f_numbers)  # C (sigma)
+        _string('A', row_sigma, 'Standard deviation', f_caption)                     # A (caption)
+        _formula('C', row_sigma, '=SQRT(%s)' % (cell('K', row_total)), f_estimates)  # C (sigma)
 
         # kappa: correction factor
         row_footer += 1
         row_kappa = row_footer
-        _string('A', row_kappa, 'K', f_bold)     # A (caption)
-        _number('C', row_kappa, 1.5, f_numbers)  # C (kappa)
+        _string('A', row_kappa, 'K', f_caption)    # A (caption)
+        _number('C', row_kappa, 1.5, f_estimates)  # C (kappa)
 
         if (self._p99):
             # P=99%, super precision
@@ -437,15 +629,15 @@ class Processor:
         row_footer += 1
         _string('A', row_footer, 'Min (%s)' % p_title, f_total)  # A (caption)
         _string('B', row_footer, '', f_total)                    # B
-        _formula('C', row_footer, '=%s-%s*%s' % (cell('I', row_total), p_multiplier, cell('C', row_sigma)), f_total_numbers)  # C (min)
-        _formula('D', row_footer, '=%s*%s' % (cell('C', row_footer), cell('C', row_kappa)),  f_final_numbers)                 # D (modified)
+        _formula('C', row_footer, '=%s-%s*%s' % (cell('I', row_total), p_multiplier, cell('C', row_sigma)), f_total, f_estimates)  # C (min)
+        _formula('D', row_footer, '=%s*%s' % (cell('C', row_footer), cell('C', row_kappa)),  f_final, f_estimates)                 # D (modified)
 
         # Max (P=95/99%)
         row_footer += 1
         _string('A', row_footer, 'Min (%s)' % p_title, f_total)  # A (caption)
         _string('B', row_footer, '', f_total)                    # B
-        _formula('C', row_footer, '=%s+%s*%s' % (cell('I', row_total), p_multiplier, cell('C', row_sigma)), f_total_numbers)  # C (min)
-        _formula('D', row_footer, '=%s*%s' % (cell('C', row_footer), cell('C', row_kappa)),  f_final_numbers)                 # D (modified)
+        _formula('C', row_footer, '=%s+%s*%s' % (cell('I', row_total), p_multiplier, cell('C', row_sigma)), f_total, f_estimates)  # C (min)
+        _formula('D', row_footer, '=%s*%s' % (cell('C', row_footer), cell('C', row_kappa)),  f_final, f_estimates)                 # D (modified)
 
     # create a report
     def report(self, root, path):
@@ -488,6 +680,13 @@ if __name__ == "__main__":
         action='store_false',
         dest='roles',
         help='''don't provide estimation details for each role'''
+    )
+
+    parser.add_argument(
+        '--formulas',
+        action='store_true',
+        dest='formulas',
+        help='''use formulas for estimation numbers'''
     )
 
     parser.add_argument(

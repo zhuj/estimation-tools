@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -e
 
 python2.7 ../src/estimate.py -h > estimate.help
 python2.7 ../src/estimate.py 'Estimation Tool.mm'
