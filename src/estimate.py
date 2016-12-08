@@ -76,6 +76,7 @@ class Node:
         self._annotations = {}
         self._childs = []
         self._estimations = {}
+        self._estimates_cache = None
 
     def title(self):
         return self._title
@@ -110,33 +111,62 @@ class Node:
             self._annotations[name] = l
 
     def estimate(self, role, numbers):
-        prev = self._estimations.get(role, None)
-        if prev is None:
-            self._estimations[role] = Estimation(numbers)
-        else:
-            self._estimations[role] = prev + numbers
+
+        # update source
+        val = self._estimations.get(role, None)
+        if val is None: val = Estimation(numbers)
+        else: val = val + numbers
+        self._estimations[role] = val
+
+        # and merge it
+        self._estimates_cache = Node._estimates(self._estimations)
 
     def estimates(self):
-        if (len(self._estimations) > 0):
-            estimations = self._estimations.values()
-            if (estimations):
-                return reduce(
-                    lambda x,y: x+y,
-                    estimations
-                )
-        return None
+        return self._estimates_cache
 
+    @staticmethod
+    def _estimates(estimations):
+        if (len(estimations) <= 0): return None
+
+        estimations = estimations.values()
+        if (not estimations): return None
+
+        return reduce(lambda x,y: x+y, estimations)
+
+
+# color management
+import colorsys
+def _hls(h, l, s):
+    r, g, b = ( int(0xff * i) for i in colorsys.hls_to_rgb(h, l, s) )
+    return "#%02X%02X%02X" % (r, g, b)
 
 # default theme (theme wrapper)
 class Theme:
     """It wraps given object and looks into it for values: it will use default value it nothing is found.""" 
 
-    DEFAULT_SECTION_0 = '#DEEAF2'
-    DEFAULT_SECTION_1 = None
+    _NO_VALUE = object()
 
-    DEFAULT_TOTAL     = '#F2EFED'
-    DEFAULT_FINAL     = '#E9DFDB'
-    DEFAULT_ROLE      = '#7f7f7f'
+    _SERIES_L = [ 0x84, 0xc2, 0xe0, 0xe8, 0xf0, 0xf8 ]
+    _SERIES_L = [ float(l)/0xff for l in _SERIES_L ]
+    _SERIES_S = 0.318
+
+    _SERIES_H = 0.567
+    DEFAULT_SECTION_H,\
+    DEFAULT_SECTION_1,\
+    DEFAULT_SECTION_2,\
+    DEFAULT_SECTION_3,\
+    DEFAULT_SECTION_4,\
+    DEFAULT_SECTION_5 = [
+        _hls(_SERIES_H, l, _SERIES_S) for l in _SERIES_L
+    ]
+
+    _SERIES_H = 0.067
+    DEFAULT_FINAL,\
+    DEFAULT_TOTAL = [
+        _hls(_SERIES_H, l, _SERIES_S) for l in (_SERIES_L[2], _SERIES_L[4])
+    ]
+
+    DEFAULT_ROLE = '#7f7f7f'
 
     # default base style
     DEFAULT_F_DEFAULT = {
@@ -169,26 +199,48 @@ class Theme:
 
     # comment row
     DEFAULT_F_COMMENT = {
-        'text_wrap': True
+        'text_wrap': True,
+        'italic': False,
+        'bold': False
     }
 
     # roles (temporary) row caption
     DEFAULT_F_ROLE_ROW = lambda self: {
-        'font_color': self.ROLE
+        'font_color': self.ROLE,
+        'italic': False,
+        'bold': False
     }
 
-    # 2nd level sections
+    # 1st level (root) sections
     DEFAULT_F_SECTION_1 = lambda self: {
-        'italic': True,
+        'bold': True,
         'text_wrap': True,
         'bg_color': self.SECTION_1
     }
 
-    # 1st level (root) sections
-    DEFAULT_F_SECTION_0 = lambda self: {
-        'bold': True,
+    # 2nd level sections
+    DEFAULT_F_SECTION_2 = lambda self: {
+        'italic': True,
         'text_wrap': True,
-        'bg_color': self.SECTION_0
+        'bg_color': self.SECTION_2
+    }
+
+    # 3rd level sections
+    DEFAULT_F_SECTION_3 = lambda self: {
+        'text_wrap': True,
+        'bg_color': self.SECTION_3
+    }
+
+    # 4th level sections
+    DEFAULT_F_SECTION_4 = lambda self: {
+        'text_wrap': True,
+        'bg_color': self.SECTION_4
+    }
+
+    # 5th level sections
+    DEFAULT_F_SECTION_5 = lambda self: {
+        'text_wrap': True,
+        'bg_color': self.SECTION_5
     }
 
     # total row
@@ -207,8 +259,8 @@ class Theme:
         self._obj = obj
 
     def __getattr__(self, attr):
-        v = getattr(self._obj, attr, None)
-        if (v is None):
+        v = getattr(self._obj, attr, Theme._NO_VALUE)
+        if (v is Theme._NO_VALUE):
             v = getattr(Theme, 'DEFAULT_' + attr)
 
         if (callable(v)): v = v(self)
@@ -308,11 +360,13 @@ class Processor:
         xmlNodes = [ n for n in xmlNodes if n.nodeType == n.ELEMENT_NODE ]
         xmlNodes = [ n for n in xmlNodes if n.tagName == 'node' ]
 
+        # sort by title
         if (self._sorting):
             xmlNodes = [ (Processor._text(x), x) for x in xmlNodes ]
             xmlNodes.sort(lambda x, y: cmp(x[0], y[0]))
             xmlNodes = [ x for title, x in xmlNodes ]
 
+        # start working with nodes
         for xmlNode in xmlNodes:
             title = Processor._text(xmlNode)
 
@@ -372,7 +426,12 @@ class Processor:
             """ it collects the given hierarchy to list of lines """
             lines = []
             def _collectChilds(node):
-                for n in node.childs():
+                childs = node.childs()
+                childs.sort(lambda x, y: cmp(
+                    x.estimates() is not None,
+                    y.estimates() is not None
+                ))
+                for n in childs:
                     lines.append(n)
                     _collectChilds(n)
             _collectChilds(root)
@@ -483,14 +542,13 @@ class Processor:
             # ---------------
             # not a role case (visible rows, main data)
 
-            # determine row format (and store them to current line)
+            # determine row format (for non-estimation lines only)
             f_row = None
             if (estimates is None):
-                if (0 == l.level()):
-                    f_row = self._theme.F_SECTION_0
-                elif (1 == l.level()):
-                    f_row = self._theme.F_SECTION_1
+                try: f_row = getattr(self._theme, 'F_SECTION_%s' % (1 + l.level()))
+                except: pass
 
+            # and store them to current line
             l._f_row = f_row
 
             # multiplier will be used in SUMPRODUCT formulas:
