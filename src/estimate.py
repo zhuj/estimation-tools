@@ -17,7 +17,9 @@
 #
 # estimate.py
 # pip install xlsxwriter
+#
 # don't forget to recalculate fromulas (ctrl+shitf+f9 for libreoffice)
+# don't forget to refresh filtering (column B filter, empty values, a bug in xlsxwriter and libreoffice)
 
 """
 """
@@ -187,6 +189,11 @@ class Theme:
         'bold': True
     }
 
+    # default multiplier format
+    DEFAULT_F_MULTIPLIER = {
+        'num_format': '0'
+    }
+
     # default number format
     DEFAULT_F_NUMBERS = {
         'num_format': '0.00'
@@ -344,6 +351,7 @@ class Processor:
         self._p99 = options.p99 and True or False
         self._roles = options.roles and True or False
         self._formulas = self._roles and (options.formulas and True or False)
+        self._filter_visibility = (options.filter_visibility and True or False) # self._roles
 
     @staticmethod
     def _text(xmlNode):
@@ -443,13 +451,16 @@ class Processor:
         _cf_cache = FormatCache(self._theme, lambda f: wb.add_format(f))
 
         # helper functions
-        cell = lambda a, b: "%s%s" % (a, (1+b))
+        cell  = lambda a, b: "%s%s" % (a, (1+b))
         cells = lambda a, b: "%s:%s" % (cell(a, b[0]), cell(a, b[1]))
 
-        _column = lambda c, width, f=None, options={}: wb_sheet.set_column('%s:%s' % (c, c), width=width, cell_format=_cf_cache.get(f), options=options)
-        _string = lambda c, r, string, *f: wb_sheet.write_string(cell(c, r), string, cell_format = _cf_cache.get(*f))
-        _number = lambda c, r, number, *f: wb_sheet.write_number(cell(c, r), number, cell_format = _cf_cache.get(self._theme.F_NUMBERS, *f))
+        _column  = lambda c, width, f=None, options={}: wb_sheet.set_column('%s:%s' % (c, c), width=width, cell_format=_cf_cache.get(f), options=options)
+
+        _string  = lambda c, r, string, *f: wb_sheet.write_string(cell(c, r), string, cell_format = _cf_cache.get(*f))
+        _number  = lambda c, r, number, *f: wb_sheet.write_number(cell(c, r), number, cell_format = _cf_cache.get(self._theme.F_NUMBERS, *f))
         _formula = lambda c, r, formula, *f: wb_sheet.write_formula(cell(c, r), formula, cell_format = _cf_cache.get(self._theme.F_NUMBERS, *f))
+        #_blank   = lambda c, r, *f: wb_sheet.write_blank(cell(c, r), blank = '', cell_format = _cf_cache.get(*f))
+        _blank   = lambda c, r, *f: _string(c,r,'',*f)
 
         # init format (style) table
         f_caption = self._theme.F_CAPTION
@@ -458,13 +469,14 @@ class Processor:
         f_role = self._theme.F_ROLE_ROW
         f_total = self._theme.F_TOTAL
         f_final = self._theme.F_FINAL
+        f_multiplier = self._theme.F_MULTIPLIER
 
         # create & init sheet
         wb_sheet = wb.add_worksheet()
 
         # setup columns
         _column('A', width=40, f=self._theme.F_DEFAULT)
-        _column('B', width=3,  f=self._theme.F_DEFAULT, options={'hidden': True})
+        _column('B', width=3,  f=self._theme.F_MULTIPLIER)
         _column('C', width=6,  f=self._theme.F_DEFAULT)
         _column('D', width=50, f=self._theme.F_COMMENT)
         _column('E', width=7,  f=self._theme.F_NUMBERS)
@@ -475,13 +487,16 @@ class Processor:
         _column('J', width=7,  f=self._theme.F_NUMBERS)
         _column('K', width=7,  f=self._theme.F_NUMBERS)
 
+        if (not self._filter_visibility):
+            _column('B', width=3,  f=self._theme.F_MULTIPLIER, options = { 'hidden': True })
+
         # start rows
         row = 0
 
         # header (row = 1)
         f_header = self._theme.F_HEADER
         _string('A', row, 'Task / Subtask', f_header)  # A: caption
-        _string('B', row, '', f_header)                # B: hidden
+        _string('B', row, 'Filter', f_header)          # B: visibility
         _string('C', row, '', f_header)                # C: empty
         _string('D', row, 'Comment', f_header)         # D: comment
         _string('E', row, 'Min', f_header)             # E: estimate
@@ -522,15 +537,12 @@ class Processor:
                 role_rows.append(row)
 
                 # set row options (hide it)
-                wb_sheet.set_row(row, options={
-                    'hidden': True,
-                    'collapsed': True
-                })
+                wb_sheet.set_row(row, options={ 'hidden': True })
 
                 # fill with values
                 _string('A', row, l.title_with_level(), f_role)  # A (title)
-                _number('B', row, 0, f_role)                     # B (visibility/multiplier)
-                _string('C', row, '', f_role)                    # C (empty)
+                _number('B', row, 0, f_role, f_multiplier)       # B (visibility/multiplier)
+                _blank('C', row, f_role)                         # C (empty)
                 _string('D', row, '', f_role)                    # D (comment)
                 if (estimates is not None):
                     _number('E', row, estimates[0], f_role)      # E (estimate)
@@ -556,17 +568,21 @@ class Processor:
             multiplier = (not role) and (estimates is not None)
 
             # let's fill the row with data
-            _string('A', row, l.title_with_level(), f_row)                                  # A (title)
-            _number('B', row, (multiplier and 1 or 0), f_row)                               # B (visibility/multiplier)
-            _string('C', row, '', f_row)                                                    # C (empty)
-            _string('D', row, ';\n'.join(l.annotation('comment')), f_row, f_comment)        # D (comment)
-            _string('E', row, '', f_row)                                                    # E (estimate)
-            _string('F', row, '', f_row)                                                    # F (estimate)
-            _string('G', row, '', f_row)                                                    # G (estimate)
-            _string('H', row, '', f_row)                                                    # H (empty)
-            _string('I', row, '', f_row)                                                    # I (estimate)
-            _string('J', row, '', f_row)                                                    # J (estimate)
-            _string('K', row, '', f_row)                                                    # K (estimate)
+            _string('A', row, l.title_with_level(), f_row)                            # A (title)
+            _blank('B', row, f_row, f_multiplier)                                     # B (visibility/multiplier)
+            _blank('C', row, f_row)                                                   # C (empty)
+            _string('D', row, ';\n'.join(l.annotation('comment')), f_row, f_comment)  # D (comment)
+            _string('E', row, '', f_row)                                              # E (estimate)
+            _string('F', row, '', f_row)                                              # F (estimate)
+            _string('G', row, '', f_row)                                              # G (estimate)
+            _blank('H', row, f_row)                                                   # H (empty)
+            _string('I', row, '', f_row)                                              # I (estimate)
+            _string('J', row, '', f_row)                                              # J (estimate)
+            _string('K', row, '', f_row)                                              # K (estimate)
+
+            # setup visibility/multiplier
+            if (multiplier):
+                _number('B', row, 1, f_row, f_multiplier)    # B (visibility/multiplier)
 
             if (estimates is not None):
                 _number('E', row, estimates[0], f_row, f_estimates)               # E (estimate)
@@ -587,13 +603,16 @@ class Processor:
 
                 l_row = row_lines[id(l)]
 
+                # build a formula
                 template = "=0"
                 for c in l.childs():
                     c_row = row_lines[id(c)]
                     template += "+"+cell("#", c_row)
 
+                # trim the formula
                 template = template.replace("=0+", "=")
 
+                # write write to document
                 f_row = l._f_row
                 if (l.estimates()):
                     _formula('E', l_row, template.replace('#', 'E'), f_row, f_estimates)  # E (estimate)
@@ -605,18 +624,22 @@ class Processor:
                     _formula('G', l_row, template.replace('#', 'G'), f_row, f_role) # G (estimate)
 
 
+        # footer
+        row_footer = row+1
 
-        # ----------------
-        # calculate ranges
+        # ----------------------------------
+        # calculate ranges & apply filtering
         row_lines = row_lines.values()
-        row_lines = (min(row_lines), max(row_lines))
+        row_lines = (min(row_lines), max(max(row_lines), row_footer))
         row_multiplier = cells('B', row_lines)
 
         # set up autofilters (in headers)
-        wb_sheet.autofilter('%s:%s' % (cell('A',0), cell('K', row_lines[-1])))
+        wb_sheet.autofilter('%s:%s' % (cell('A', 0), cell('K', row_footer)))
+        if (self._filter_visibility):
+            wb_sheet.filter_column('B', 'x == Blanks or x == 1') # B (visibility/multiplier)
 
+        # ------
         # footer
-        row_footer = row+1
 
         # total values (it uses row_multiplier to avoid duuble calculations for roles)
         row_footer += 1
@@ -700,6 +723,27 @@ class Processor:
     # create a report
     def report(self, root, path):
         import xlsxwriter
+
+        ## -----------------------------------------------------
+        ## this is a XlsxWriter bug
+        ## the following code should be removed after the bugfix
+
+        def _write_filters(self, filters):
+            blanks = next((f for f in filters if f == 'blanks'), None)
+            if blanks is not None:
+                self._xml_start_tag('filters', [('blank', 1)])
+            else:
+                self._xml_start_tag('filters')
+
+            for autofilter in filters:
+                self._write_filter(autofilter)
+
+            self._xml_end_tag('filters')
+
+        xlsxwriter.worksheet.Worksheet._write_filters = _write_filters
+
+        ## -----------------------------------------------------
+
         with xlsxwriter.Workbook(path) as wb:
             self._report(root, wb)
 
@@ -745,6 +789,14 @@ if __name__ == "__main__":
         action='store_true',
         dest='formulas',
         help='''use formulas for estimation numbers'''
+    )
+
+    # due to the combination of the bugs in libreoffice and xlsxwriter this options are not ready
+    parser.add_argument(
+        '--filter-visibility',
+        action='store_true',
+        dest='filter_visibility',
+        help='''don't hide multiplier/visibility column, use it as a filter instead (EXPERIMENTAL)'''
     )
 
     parser.add_argument(
