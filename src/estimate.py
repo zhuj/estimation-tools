@@ -72,9 +72,12 @@ class Node:
 
     def __init__(self, parent, title):
         self._parent = parent
+
         if (self._parent is None): self._level = -1
         else: self._level = 1 + self._parent.level()
+
         self._title = title.strip()
+        self._role = (self._title) and ((self._title[0] == '(') and (self._title[-1] == ')')) or False
         self._annotations = {}
         self._childs = []
         self._estimations = {}
@@ -84,7 +87,7 @@ class Node:
         return self._title
 
     def is_role(self):
-        return ((self._title[0] == '(') and (self._title[-1] == ')'))
+        return self._role
 
     def level(self):
         return self._level
