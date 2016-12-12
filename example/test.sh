@@ -17,7 +17,7 @@ fi
 # you have to add the script from test.xba to Standard.Test module manually
 # ! uncomment the following code only after that !
 # ! Unfortunately, there is a bug in LibreOffice with filtering 'by blank' in xlsx (it works with ods) !
-if false; then
+if true; then
  ls *.xlsx | while read f; do
   libreoffice --headless "$f" "macro:///Standard.Test.RecalculateAll"
  done

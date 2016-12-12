@@ -8,15 +8,19 @@ class NodeObjectTestCase(unittest.TestCase):
     """Test estimate.Node class"""
 
     def test_role(self):
-        """Test role detection"""
+        """Test role detection by the pattern"""
 
         n = estimate.Node(parent=None, title="(role)")
         assert n.is_role()
 
+        n = estimate.Node(parent=None, title="role")
+        assert not n.is_role()
+
+
     def test_parent_and_level(self):
         """Test parent and level"""
 
-        root = estimate.Node(parent=None, title="")
+        root = estimate.Node(parent=None, title=None)
         assert root.level() is -1
         assert root.parent() is None
 
@@ -48,7 +52,7 @@ class NodeObjectTestCase(unittest.TestCase):
     def test_parent_and_childs(self):
         """Test relations between parent and childs"""
 
-        root = estimate.Node(parent=None, title="")
+        root = estimate.Node(parent=None, title=None)
         assert root.parent() is None
         assert len(root.childs()) is 0
 
@@ -63,7 +67,7 @@ class NodeObjectTestCase(unittest.TestCase):
     def test_estimations_no_role(self):
         """Test estimation (no role)"""
 
-        root = estimate.Node(parent=None, title="")
+        root = estimate.Node(parent=None, title=None)
         n0 = estimate.Node(parent=root, title="")
 
         n0.estimate(role=None, numbers=(1, 2, 3))
@@ -78,7 +82,7 @@ class NodeObjectTestCase(unittest.TestCase):
     def test_estimations_no_role(self):
         """Test estimation (different roles)"""
 
-        root = estimate.Node(parent=None, title="")
+        root = estimate.Node(parent=None, title=None)
         n0 = estimate.Node(parent=root, title="")
 
         n0.estimate(role="role1", numbers=(1, 2, 3))
@@ -93,7 +97,7 @@ class NodeObjectTestCase(unittest.TestCase):
     def test_annotation(self):
         """Test annotation (comments)"""
 
-        root = estimate.Node(parent=None, title="")
+        root = estimate.Node(parent=None, title=None)
         n0 = estimate.Node(parent=root, title="")
 
         n0.annotation(name="todo", value="v1")

@@ -1,4 +1,5 @@
 #!/usr/bin/env python2.7
+# -*- coding: utf-8 -*-
 
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
@@ -15,11 +16,15 @@
 #
 
 #
-# estimate.py
-# pip install xlsxwriter
+# usage: estimate.py [-h] [options] [-o OUTPUT] filename
 #
-# don't forget to recalculate fromulas (ctrl+shitf+f9 for libreoffice)
-# don't forget to refresh filtering (column B filter, empty values, a bug in xlsxwriter and libreoffice)
+# pre-requirements:
+# * pip install xlsxwriter
+#
+# post-reqiorements:
+# * don't forget to recalculate fromulas (ctrl+shitf+f9 for libreoffice)
+# * don't forget to refresh filtering (column B filter, empty values, a bug in xlsxwriter and libreoffice)
+#
 
 """
 """
@@ -32,7 +37,7 @@ try:
 except:
     pass
 
-# estimatuion
+# estimatuion (contains set of numbers)
 class Estimation:
     """Estimation is a set of numbers (min <= real <= max) which describes a range for time requirement."""
 
@@ -48,7 +53,7 @@ class Estimation:
         self._numbers = tuple(numbers[0:3])
 
     def __str__(self):
-        return str(self._numbers)
+        return self.__repr__()
 
     def __repr__(self):
         return str(self._numbers)
@@ -66,7 +71,7 @@ class Estimation:
             for i in xrange(3)
         ))
 
-# node
+# node (representation of mindmap xml node with additional properties)
 class Node:
     """It represents a node in modified mindmap tree (all estimates, roles and comments are collected as attributes)"""
 
@@ -76,12 +81,23 @@ class Node:
         if (self._parent is None): self._level = -1
         else: self._level = 1 + self._parent.level()
 
-        self._title = title.strip()
+        self._title = (title and title.strip() or "")
         self._role = (self._title) and ((self._title[0] == '(') and (self._title[-1] == ')')) or False
         self._annotations = {}
         self._childs = []
         self._estimations = {}
         self._estimates_cache = None
+
+    def __str__(self):
+        return self.__repr__()
+
+    def __repr__(self):
+        return '<%s level=%s estimates=%s title="%s">' % (
+            self.__class__.__name__,
+            self.level(),
+            self.estimates(),
+            self.title()
+        )
 
     def title(self):
         return self._title
@@ -139,7 +155,7 @@ class Node:
         return reduce(lambda x,y: x+y, estimations)
 
 
-# color management
+# color management (just to create color series)
 import colorsys
 def _hls(h, l, s):
     r, g, b = ( int(0xff * i) for i in colorsys.hls_to_rgb(h, l, s) )
@@ -149,12 +165,16 @@ def _hls(h, l, s):
 class Theme:
     """It wraps given object and looks into it for values: it will use default value it nothing is found.""" 
 
-    _NO_VALUE = object()
+    _NO_VALUE = object() # placeholder to distinguish true-None and no-value
 
+    # series of lightness
     _SERIES_L = [ 0x84, 0xc2, 0xe0, 0xe8, 0xf0, 0xf8 ]
     _SERIES_L = [ float(l)/0xff for l in _SERIES_L ]
+
+    # saturation (common for all coloring)
     _SERIES_S = 0.318
 
+    # tone for sections (blue sector)
     _SERIES_H = 0.567
     DEFAULT_SECTION_H,\
     DEFAULT_SECTION_1,\
@@ -165,12 +185,14 @@ class Theme:
         _hls(_SERIES_H, l, _SERIES_S) for l in _SERIES_L
     ]
 
+    # tone for total values (red sector)
     _SERIES_H = 0.067
     DEFAULT_FINAL,\
     DEFAULT_TOTAL = [
         _hls(_SERIES_H, l, _SERIES_S) for l in (_SERIES_L[2], _SERIES_L[4])
     ]
 
+    # role font color
     DEFAULT_ROLE = '#7f7f7f'
 
     # default base style
@@ -269,6 +291,7 @@ class Theme:
         self._obj = obj
 
     def __getattr__(self, attr):
+        """it looks for the attribute in associated object first, then does the same in the theme object itself"""
         v = getattr(self._obj, attr, Theme._NO_VALUE)
         if (v is Theme._NO_VALUE):
             v = getattr(Theme, 'DEFAULT_' + attr)
@@ -277,6 +300,7 @@ class Theme:
         return v
 
     def _merge_format(self, *formats):
+        """it merges (combines) all formats (dicts) together"""
         result = {}
         for f in formats:
             if (callable(f)): f = f(self)
@@ -285,6 +309,7 @@ class Theme:
         return { k:v for k,v in result.items() if v is not None }
 
     def format(self, opts = {}):
+        """public method for formats: it extends default format with the given one"""
         return self._merge_format(self.F_DEFAULT, opts)
 
 # format cache
@@ -325,10 +350,20 @@ class FormatCache:
 class Processor:
     """Helper class which does all transformation work"""
 
+    # options
+    OPT_THEME = 'theme'
+    OPT_SORTING = 'sorting'
+    OPT_P_99 = 'p99'
+    OPT_ROLES = 'roles'
+    OPT_FORMULAS = 'formulas'
+    OPT_FILTER_VISIBILITY = 'filter_visibility'
+
+    # regexps patterns
     import re
     RE_ESTIMATE = re.compile("estimate\\s*=(\\s*\\d+\\s*)[/](\\s*\\d+\\s*)[/](\\s*\\d+\\s*)")
     RE_ANNOTATION = re.compile("^[[](\\w+)[]]\\s*(.*)")
 
+    # annotation types
     ANNOTATIONS = {
         'warn': ('comment', '(!) '),
         'idea': ('comment', ''),
@@ -349,12 +384,12 @@ class Processor:
 
     #
     def __init__(self, options):
-        self._sorting = options.sorting and True or False
-        self._theme = Processor._loadTheme(options.theme)
-        self._p99 = options.p99 and True or False
-        self._roles = options.roles and True or False
-        self._formulas = self._roles and (options.formulas and True or False)
-        self._filter_visibility = (options.filter_visibility and True or False) # self._roles
+        self._theme = Processor._loadTheme(getattr(options, Processor.OPT_THEME, None))
+        self._sorting = getattr(options, Processor.OPT_SORTING, False) and True
+        self._p99 = getattr(options, Processor.OPT_P_99, False) and True
+        self._roles = getattr(options, Processor.OPT_ROLES, False) and True
+        self._formulas = self._roles and (getattr(options, Processor.OPT_FORMULAS, False) and True)
+        self._filter_visibility = self._roles and (getattr(options, Processor.OPT_FILTER_VISIBILITY, False) and True)
 
     @staticmethod
     def _text(xmlNode):
@@ -449,6 +484,13 @@ class Processor:
             return lines
 
         lines = _collect(root)
+        lines = [ l for l in lines if l ]
+
+        if (not lines):
+            return # do nothing with empty document
+
+        # --------------------
+        # start transformation
 
         # cell format cache
         _cf_cache = FormatCache(self._theme, lambda f: wb.add_format(f))
@@ -475,7 +517,7 @@ class Processor:
         f_multiplier = self._theme.F_MULTIPLIER
 
         # create & init sheet
-        wb_sheet = wb.add_worksheet()
+        wb_sheet = wb.add_worksheet(name="Estimates")
 
         # setup columns
         _column('A', width=40, f=self._theme.F_DEFAULT)
@@ -491,7 +533,7 @@ class Processor:
         _column('K', width=7,  f=self._theme.F_NUMBERS)
 
         if (not self._filter_visibility):
-            _column('B', width=3,  f=self._theme.F_MULTIPLIER, options = { 'hidden': True })
+            _column('B', width=3,  f=self._theme.F_MULTIPLIER, options={ 'hidden': True })
 
         # start rows
         row = 0
@@ -514,9 +556,6 @@ class Processor:
         roles_rows = {}
         row_lines = {}
         for l in lines:
-
-            # first, remove all empty lines
-            if (not l): continue
 
             # then remove role-rows, if it's required
             role = l.is_role()
@@ -718,13 +757,13 @@ class Processor:
 
         # Max (P=95/99%)
         row_footer += 1
-        _string('A', row_footer, 'Min (%s)' % p_title, f_total)  # A (caption)
+        _string('A', row_footer, 'Max (%s)' % p_title, f_total)  # A (caption)
         _string('B', row_footer, '', f_total)                    # B
         _formula('C', row_footer, '=%s+%s*%s' % (cell('I', row_total), p_multiplier, cell('C', row_sigma)), f_total, f_estimates)  # C (min)
         _formula('D', row_footer, '=%s*%s' % (cell('C', row_footer), cell('C', row_kappa)),  f_final, f_estimates)                 # D (modified)
 
     # create a report
-    def report(self, root, path):
+    def report(self, root, filename):
         import xlsxwriter
 
         ## -----------------------------------------------------
@@ -747,7 +786,7 @@ class Processor:
 
         ## -----------------------------------------------------
 
-        with xlsxwriter.Workbook(path) as wb:
+        with xlsxwriter.Workbook(filename=filename, options={'in_memory': True}) as wb:
             self._report(root, wb)
 
 # let's dance
@@ -760,37 +799,37 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        '--sort', '-s',
-        action='store_true',
-        dest='sorting',
-        help='''sort children nodes by title'''
+        '--theme',
+        action='store',
+        dest=Processor.OPT_THEME,
+        help='''use a given .py file as a theme'''
     )
 
     parser.add_argument(
-        '--theme',
-        action='store',
-        dest='theme',
-        help='''use a given .py file as a theme'''
+        '--sort', '-s',
+        action='store_true',
+        dest=Processor.OPT_SORTING,
+        help='''sort children nodes by title'''
     )
 
     parser.add_argument(
         '--p99',
         action='store_true',
-        dest='p99',
+        dest=Processor.OPT_P_99,
         help='''use P=99%% instead of P=95%%'''
     )
 
     parser.add_argument(
         '--no-roles',
         action='store_false',
-        dest='roles',
+        dest=Processor.OPT_ROLES,
         help='''don't provide estimation details for each role'''
     )
 
     parser.add_argument(
         '--formulas',
         action='store_true',
-        dest='formulas',
+        dest=Processor.OPT_FORMULAS,
         help='''use formulas for estimation numbers'''
     )
 
@@ -798,7 +837,7 @@ if __name__ == "__main__":
     parser.add_argument(
         '--filter-visibility',
         action='store_true',
-        dest='filter_visibility',
+        dest=Processor.OPT_FILTER_VISIBILITY,
         help='''don't hide multiplier/visibility column, use it as a filter instead (EXPERIMENTAL)'''
     )
 
