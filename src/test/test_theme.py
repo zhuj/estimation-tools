@@ -10,22 +10,22 @@ class ThemeObjectTestCase(unittest.TestCase):
     def test_getattr_empty_theme(self):
         """Test getattr with empty object"""
         t = estimate.Theme(obj = object())
-        assert t.F_DEFAULT is estimate.Theme.DEFAULT_F_DEFAULT
+        self.assertIs( t.F_DEFAULT, estimate.Theme.DEFAULT_F_DEFAULT )
 
     def test_getattr_nonempty_theme(self):
         """Test getattr with non-empty object"""
         class T: F_DEFAULT = { 'font_name': 'Verdana' }
         t = estimate.Theme(obj = T)
-        assert t.F_DEFAULT is not estimate.Theme.DEFAULT_F_DEFAULT
-        assert t.F_DEFAULT is T.F_DEFAULT
+        self.assertIsNot( t.F_DEFAULT, estimate.Theme.DEFAULT_F_DEFAULT )
+        self.assertIs( t.F_DEFAULT, T.F_DEFAULT )
 
     def test_f_default(self):
         """Test format merging with default"""
         class T: F_DEFAULT = { 'font_name': 'Verdana' }
         t = estimate.Theme(obj = T)
-        assert t.format(t.F_DEFAULT)['font_name'] == 'Verdana'
-        assert t.format(t.F_CAPTION)['font_name'] == 'Verdana'
-        assert t.format(t.F_FINAL)['font_name'] == 'Verdana'
+        self.assertEqual( t.format(t.F_DEFAULT)['font_name'], 'Verdana' )
+        self.assertEqual( t.format(t.F_CAPTION)['font_name'], 'Verdana' )
+        self.assertEqual( t.format(t.F_FINAL)['font_name'], 'Verdana' )
 
     def test_sections_colors(self):
         """Test section colors"""
@@ -37,11 +37,11 @@ class ThemeObjectTestCase(unittest.TestCase):
             SECTION_5 = '#050505'
 
         t = estimate.Theme(obj = T)
-        assert t.format(t.F_SECTION_1)['bg_color'] == '#010101'
-        assert t.format(t.F_SECTION_2)['bg_color'] == '#020202'
-        assert t.format(t.F_SECTION_3)['bg_color'] == '#030303'
-        assert t.format(t.F_SECTION_4)['bg_color'] == '#040404'
-        assert t.format(t.F_SECTION_5)['bg_color'] == '#050505'
+        self.assertEqual( t.format(t.F_SECTION_1)['fill_color'], 'FF010101' )
+        self.assertEqual( t.format(t.F_SECTION_2)['fill_color'], 'FF020202' )
+        self.assertEqual( t.format(t.F_SECTION_3)['fill_color'], 'FF030303' )
+        self.assertEqual( t.format(t.F_SECTION_4)['fill_color'], 'FF040404' )
+        self.assertEqual( t.format(t.F_SECTION_5)['fill_color'], 'FF050505' )
 
     def test_sections_clear(self):
         """Test section color clears"""
@@ -54,9 +54,9 @@ class ThemeObjectTestCase(unittest.TestCase):
 
         t = estimate.Theme(obj = T)
         x = object()
-        assert t.format(t.F_SECTION_1).get('bg_color', x) is x
-        assert t.format(t.F_SECTION_2).get('bg_color', x) is x
-        assert t.format(t.F_SECTION_3).get('bg_color', x) is x
-        assert t.format(t.F_SECTION_4).get('bg_color', x) is x
-        assert t.format(t.F_SECTION_5).get('bg_color', x) is x
+        self.assertIs( t.format(t.F_SECTION_1).get('fill_color', x), x )
+        self.assertIs( t.format(t.F_SECTION_2).get('fill_color', x), x )
+        self.assertIs( t.format(t.F_SECTION_3).get('fill_color', x), x )
+        self.assertIs( t.format(t.F_SECTION_4).get('fill_color', x), x )
+        self.assertIs( t.format(t.F_SECTION_5).get('fill_color', x), x )
 

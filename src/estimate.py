@@ -19,11 +19,7 @@
 # usage: estimate.py [-h] [options] [-o OUTPUT] filename
 #
 # pre-requirements:
-# * pip install xlsxwriter
-#
-# post-reqiorements:
-# * don't forget to recalculate fromulas (ctrl+shitf+f9 for libreoffice)
-# * don't forget to refresh filtering (column B filter, empty values, a bug in xlsxwriter and libreoffice)
+# * pip install openpyxl (http://openpyxl.readthedocs.io/en/default/, https://bitbucket.org/openpyxl/openpyxl/src/)
 #
 
 """
@@ -199,19 +195,20 @@ class Theme:
     DEFAULT_F_DEFAULT = {
         'font_name': 'Arial',
         'font_size': 10,
-        'valign': 'top'
+        'align_vertical': 'top'
     }
 
     # default header format
-    DEFAULT_F_HEADER = {
-        'bold': True,
-        'bottom': 1,
-        'text_wrap': True
+    DEFAULT_F_HEADER = lambda self: {
+        'font_bold': True,
+        'border_bottom_color': '#000000',
+        'border_bottom_style': 'thin',
+        'align_wrap_text': True
     }
 
     # default cation format
     DEFAULT_F_CAPTION = {
-        'bold': True
+        'font_bold': True
     }
 
     # default multiplier format
@@ -226,65 +223,65 @@ class Theme:
 
     # default number format
     DEFAULT_F_ESTIMATES = lambda self: self._merge_format(self.F_NUMBERS, {
-        'bold': True
+        'font_bold': True
     })
 
     # comment row
     DEFAULT_F_COMMENT = {
-        'text_wrap': True,
-        'italic': False,
-        'bold': False
+        'align_wrap_text': True,
+        'font_italic': False,
+        'font_bold': False
     }
 
     # roles (temporary) row caption
     DEFAULT_F_ROLE_ROW = lambda self: {
         'font_color': self.ROLE,
-        'italic': False,
-        'bold': False
+        'font_italic': False,
+        'font_bold': False
     }
 
     # 1st level (root) sections
     DEFAULT_F_SECTION_1 = lambda self: {
-        'bold': True,
-        'text_wrap': True,
-        'bg_color': self.SECTION_1
+        'font_bold': True,
+        'align_wrap_text': True,
+        'fill_color': self.SECTION_1
     }
 
     # 2nd level sections
     DEFAULT_F_SECTION_2 = lambda self: {
-        'italic': True,
-        'text_wrap': True,
-        'bg_color': self.SECTION_2
+        'font_italic': True,
+        'align_wrap_text': True,
+        'fill_color': self.SECTION_2
     }
 
     # 3rd level sections
     DEFAULT_F_SECTION_3 = lambda self: {
-        'text_wrap': True,
-        'bg_color': self.SECTION_3
+        'align_wrap_text': True,
+        'fill_color': self.SECTION_3
     }
 
     # 4th level sections
     DEFAULT_F_SECTION_4 = lambda self: {
-        'text_wrap': True,
-        'bg_color': self.SECTION_4
+        'align_wrap_text': True,
+        'fill_color': self.SECTION_4
     }
 
     # 5th level sections
     DEFAULT_F_SECTION_5 = lambda self: {
-        'text_wrap': True,
-        'bg_color': self.SECTION_5
+        'align_wrap_text': True,
+        'fill_color': self.SECTION_5
     }
 
     # total row
     DEFAULT_F_TOTAL = lambda self: {
-        'bold': True,
-        'bg_color': self.TOTAL
+        'font_bold': True,
+        'fill_color': self.TOTAL
     }
 
     # final values
     DEFAULT_F_FINAL = lambda self: {
-        'bold': True,
-        'bg_color': self.FINAL
+        'font_bold': True,
+        'fill_color': self.FINAL
     }
 
     def __init__(self, obj):
@@ -296,7 +293,12 @@ class Theme:
         if (v is Theme._NO_VALUE):
             v = getattr(Theme, 'DEFAULT_' + attr)
 
-        if (callable(v)): v = v(self)
+        if (callable(v)):
+            v = v(self)
+
+        if (type(v) is str):
+            if (len(v) == 7 and v[0] == '#'): v = 'FF' + v[1:]
+
         return v
 
     def _merge_format(self, *formats):
@@ -316,9 +318,9 @@ class Theme:
 class FormatCache:
     """It wraps current theme and call format registration only for completely new format combination"""
 
-    def __init__(self, theme, register):
+    def __init__(self, format=lambda f:f, register=lambda f:f):
         self._cache = {}
-        self._theme = theme
+        self._format = format
         self._register = register
 
     @staticmethod
@@ -340,7 +342,7 @@ class FormatCache:
         key = FormatCache._key(format)
         val = self._cache.get(key, None)
         if (val is None):
-            format = self._theme.format(format)
+            format = self._format(format)
             self._cache[key] = val = self._register(format)
 
         return val
@@ -349,6 +351,8 @@ class FormatCache:
 # processor helper
 class Processor:
     """Helper class which does all transformation work"""
+
+    import openpyxl as pyxl
 
     # options
     OPT_THEME = 'theme'
@@ -464,48 +468,99 @@ class Processor:
         return root
 
     #
-    def _report(self, root, wb):
+    @staticmethod
+    def _collect(root):
+        """ it collects the given hierarchy to list of lines """
+
+        lines = []
+
+        def _collectChilds(node):
+            childs = node.childs()
+            childs.sort(lambda x, y: cmp(
+                x.estimates() is not None,
+                y.estimates() is not None
+            ))
+            for n in childs:
+                lines.append(n)
+                _collectChilds(n)
+
+        _collectChilds(root)
+        return [ l for l in lines if l ]
+
+    #
+    @staticmethod
+    def _cf_cache(theme):
+        """ build cell-format cache """
+
+        _filter_map = lambda map, prefix: { k[len(prefix):]: v for (k, v) in map.items() if k.startswith(prefix) }
+
+        _cf_font_cache = FormatCache(
+            register=lambda f: f and Processor.pyxl.styles.Font(**f) or None
+        )
+
+        _cf_fill_cache = FormatCache(
+            register=lambda f: f and Processor.pyxl.styles.PatternFill(fill_type='solid', start_color=f.get('color', None)) or None
+        )
+
+        _cf_align_cache = FormatCache(
+            register=lambda f: f and Processor.pyxl.styles.Alignment(**f) or None
+        )
+
+        _cf_border_cache = FormatCache(
+            register=lambda f: f and Processor.pyxl.styles.Border(**{
+                side: Processor.pyxl.styles.Side(
+                    border_style = map.get("style", None),
+                    color = map.get("color", None),
+                )
+                for side, map in (
+                    (side, _filter_map(f, side))
+                    for side in ('left', 'right', 'top', 'bottom')
+                )
+                }) or None
+        )
+
+        return FormatCache(
+            format=lambda f: theme.format(f),
+            register=lambda f: {
+                'font': _cf_font_cache.get( _filter_map(f, 'font_') ),
+                'fill': _cf_fill_cache.get( _filter_map(f, 'fill_') ),
+                'alignment': _cf_align_cache.get( _filter_map(f, 'align_') ),
+                'border': _cf_border_cache.get( _filter_map(f, 'border_') ),
+                'number_format': f.get('num_format', None)
+            }
+        )
+
+
+#
+    def _report(self, root, ws):
         # see https://en.wikipedia.org/wiki/Three-point_estimation
 
         # first transform tree to lines
-        def _collect(root):
-            """ it collects the given hierarchy to list of lines """
-            lines = []
-            def _collectChilds(node):
-                childs = node.childs()
-                childs.sort(lambda x, y: cmp(
-                    x.estimates() is not None,
-                    y.estimates() is not None
-                ))
-                for n in childs:
-                    lines.append(n)
-                    _collectChilds(n)
-            _collectChilds(root)
-            return lines
-
-        lines = _collect(root)
-        lines = [ l for l in lines if l ]
-
-        if (not lines):
-            return # do nothing with empty document
-
-        # --------------------
-        # start transformation
+        lines = Processor._collect(root)
+        if (not lines): return # do nothing with empty document
 
         # cell format cache
-        _cf_cache = FormatCache(self._theme, lambda f: wb.add_format(f))
+        _cf_cache = Processor._cf_cache(self._theme)
 
         # helper functions
-        cell  = lambda a, b: "%s%s" % (a, (1+b))
-        cells = lambda a, b: "%s:%s" % (cell(a, b[0]), cell(a, b[1]))
+        cell  = lambda c, r: "%s%s" % (c, (1+r))
+        cells = lambda c, r: "%s:%s" % (cell(c, r[0]), cell(c, r[1]))
 
-        _column  = lambda c, width, f=None, options={}: wb_sheet.set_column('%s:%s' % (c, c), width=width, cell_format=_cf_cache.get(f), options=options)
+        def _apply_format(c, *f):
+            f = _cf_cache.get(*f)
+            for x in ('font', 'fill', 'alignment', 'number_format'):
+                v = f.get(x, None)
+                if v is not None: setattr(c, x, v)
+            return c
 
-        _string  = lambda c, r, string, *f: wb_sheet.write_string(cell(c, r), string, cell_format = _cf_cache.get(*f))
-        _number  = lambda c, r, number, *f: wb_sheet.write_number(cell(c, r), number, cell_format = _cf_cache.get(self._theme.F_NUMBERS, *f))
-        _formula = lambda c, r, formula, *f: wb_sheet.write_formula(cell(c, r), formula, cell_format = _cf_cache.get(self._theme.F_NUMBERS, *f))
-        #_blank   = lambda c, r, *f: wb_sheet.write_blank(cell(c, r), blank = '', cell_format = _cf_cache.get(*f))
-        _blank   = lambda c, r, *f: _string(c,r,'',*f)
+        def _hide_column(c, hidden=True): ws.column_dimensions[c].hidden = hidden
+        def _hide_row(r, hidden=True): ws.row_dimensions[1+r].hidden = hidden
+
+        def _column(c, width, f): _apply_format(ws.column_dimensions[c], f).width = width
+        def _string(c, r, string, *f): _apply_format(ws[cell(c, r)], *f).value = string
+        def _number(c, r, number, *f): _apply_format(ws[cell(c, r)], self._theme.F_NUMBERS, *f).value = number
+        def _formula(c, r, formula, *f): _apply_format(ws[cell(c, r)], self._theme.F_NUMBERS, *f).value = formula
+        def _blank(c, r, *f): _string(c, r, '', *f)
 
         # init format (style) table
         f_caption = self._theme.F_CAPTION
@@ -516,8 +571,8 @@ class Processor:
         f_final = self._theme.F_FINAL
         f_multiplier = self._theme.F_MULTIPLIER
 
-        # create & init sheet
-        wb_sheet = wb.add_worksheet(name="Estimates")
+        # ------------
+        # setup header
 
         # setup columns
         _column('A', width=40, f=self._theme.F_DEFAULT)
@@ -533,7 +588,7 @@ class Processor:
         _column('K', width=7,  f=self._theme.F_NUMBERS)
 
         if (not self._filter_visibility):
-            _column('B', width=3,  f=self._theme.F_MULTIPLIER, options={ 'hidden': True })
+            _hide_column('B', hidden=True)
 
         # start rows
         row = 0
@@ -551,6 +606,9 @@ class Processor:
         _string('I', row, 'Avg', f_header)             # I: weighted mean
         _string('J', row, 'SD', f_header)              # J: standard deviation
         _string('K', row, 'Sq', f_header)              # K: squared deviation
+
+        # ------------------------
+        # start the transformation
 
         # lines
         roles_rows = {}
@@ -579,7 +637,7 @@ class Processor:
                 role_rows.append(row)
 
                 # set row options (hide it)
-                wb_sheet.set_row(row, options={ 'hidden': True })
+                _hide_row(row, hidden=True)
 
                 # fill with values
                 _string('A', row, l.title_with_level(), f_role)  # A (title)
@@ -676,9 +734,9 @@ class Processor:
         row_multiplier = cells('B', row_lines)
 
         # set up autofilters (in headers)
-        wb_sheet.autofilter('%s:%s' % (cell('A', 0), cell('K', row_footer)))
+        ws.auto_filter.ref = '%s:%s' % (cell('A', 0), cell('K', row_footer))
         if (self._filter_visibility):
-            wb_sheet.filter_column('B', 'x == Blanks or x == 1') # B (visibility/multiplier)
+            ws.auto_filter.add_filter_column(1+(ord('B')-ord('A')), ["", "1"]) # B (visibility/multiplier)
 
         # ------
         # footer
@@ -708,7 +766,8 @@ class Processor:
                 role_num += 1
                 role_column = chr(ord('L') + role_num) # new column for each role, started from 'L'
 
-                _column(role_column, width=10, f=self._theme.F_DEFAULT, options={'hidden': True})
+                _column(role_column, width=10, f=self._theme.F_DEFAULT)
+                _hide_column(role_column, hidden=True)
 
                 _string(role_column, 0, role, f_header)
                 for role_row in role_rows:
@@ -764,30 +823,13 @@ class Processor:
 
     # create a report
     def report(self, root, filename):
-        import xlsxwriter
+        wb = Processor.pyxl.Workbook()
+        ws = wb.active
+        ws.title = 'Estimates'
+        self._report(root, ws)
+        wb.save(filename=filename)
+        return wb
 
-        ## -----------------------------------------------------
-        ## this is a XlsxWriter bug
-        ## the following code should be removed after the bugfix
-
-        def _write_filters(self, filters):
-            blanks = next((f for f in filters if f == 'blanks'), None)
-            if blanks is not None:
-                self._xml_start_tag('filters', [('blank', 1)])
-            else:
-                self._xml_start_tag('filters')
-
-            for autofilter in filters:
-                self._write_filter(autofilter)
-
-            self._xml_end_tag('filters')
-
-        xlsxwriter.worksheet.Worksheet._write_filters = _write_filters
-
-        ## -----------------------------------------------------
-
-        with xlsxwriter.Workbook(filename=filename, options={'in_memory': True}) as wb:
-            self._report(root, wb)
 
 # let's dance
 if __name__ == "__main__":

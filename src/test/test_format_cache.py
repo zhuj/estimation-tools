@@ -16,28 +16,28 @@ class FormatCacheObjectTestCase(unittest.TestCase):
             return format
 
         t = estimate.Theme(obj = object())
-        c = estimate.FormatCache(theme = t, register = _register)
+        c = estimate.FormatCache(format = t.format, register = _register)
 
         # initially we have no calls
-        assert C._count == 0
+        self.assertEqual( C._count, 0 )
 
         # first call after empty options
-        assert c.get() == t.F_DEFAULT
-        assert C._count == 1
+        self.assertEqual( c.get(), t.F_DEFAULT )
+        self.assertEqual( C._count, 1 )
 
         # no call (the value has already been cached)
-        assert c.get({}) == t.F_DEFAULT
-        assert C._count == 1
+        self.assertEqual( c.get({}), t.F_DEFAULT )
+        self.assertEqual( C._count, 1 )
 
         # 2nd call - we have new key
-        assert c.get({'a':1}) == t.format({'a':1})
-        assert C._count == 2
+        self.assertEqual( c.get({'a':1}), t.format({'a':1}) )
+        self.assertEqual( C._count, 2 )
 
         # the same key - no extra call
-        assert c.get({'a':1}) == t.format({'a':1})
-        assert C._count == 2
+        self.assertEqual( c.get({'a':1}), t.format({'a':1}) )
+        self.assertEqual( C._count, 2 )
 
         # the same key - no extra call
-        assert c.get({'a':1}, {'b':2}) == t.format({'a':1, 'b':2})
-        assert C._count == 3
+        self.assertEqual( c.get({'a':1}, {'b':2}), t.format({'a':1, 'b':2}) )
+        self.assertEqual( C._count, 3 )
 
