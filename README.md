@@ -12,4 +12,4 @@ into an Xlsx estimation report like [this](https://github.com/zhuj/estimation-to
 
 ***
 
-The solution is written in python language and uses [XlsxWriter](http://xlsxwriter.readthedocs.io/) module to generate Excel XLSX files.
+The solution is written in python language and uses [OpenPyXL](http://openpyxl.readthedocs.io/en/default/) module to generate Excel XLSX files.

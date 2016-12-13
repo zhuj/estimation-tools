@@ -11,28 +11,31 @@ class EstimationObjectTestCase(unittest.TestCase):
         """Test string representation"""
 
         expected = str((1, 2, 3))
-        assert expected == str(estimate.Estimation(numbers = [1, 2, 3]))
+        self.assertEqual(
+            str(estimate.Estimation(numbers = [1, 2, 3])),
+            expected
+        )
 
     def test_creation(self):
         """Test __init__ method"""
 
         expected = str((1, 2, 3))
-        assert expected == str(estimate.Estimation(numbers = [1, 2, 3]))
-        assert expected == str(estimate.Estimation(numbers = (1, 2, 3)))
-        assert expected == str(estimate.Estimation(numbers = [1, 2, 3, 4]))
+        self.assertEqual( str(estimate.Estimation(numbers = [1, 2, 3])), expected )
+        self.assertEqual( str(estimate.Estimation(numbers = (1, 2, 3))), expected )
+        self.assertEqual( str(estimate.Estimation(numbers = [1, 2, 3, 4])), expected )
 
     def test_getitem(self):
         """Test an access of component"""
 
         e = estimate.Estimation(numbers = [1, 2, 3])
-        assert (1, 2, 3) == (e[0], e[1], e[2])
+        self.assertEqual( (e[0], e[1], e[2]), (1, 2, 3) )
 
     def test_add(self):
         """Test aggregation"""
 
         def _test(init, addon, expected):
             result = init + addon
-            assert tuple(expected) == (result[0], result[1], result[2])
+            self.assertEqual( (result[0], result[1], result[2]), tuple(expected) )
 
         _test(
             init = estimate.Estimation(numbers = [1, 2, 3]),
