@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import unittest
-import estimate
+import estimation_tools.estimate as estimate
 
 class ThemeObjectTestCase(unittest.TestCase):
     """Test estimate.Theme class"""

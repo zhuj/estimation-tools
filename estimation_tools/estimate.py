@@ -1,4 +1,4 @@
-#!/usr/bin/env python2.7
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 #
@@ -827,7 +827,8 @@ class Processor:
         ws = wb.active
         ws.title = 'Estimates'
         self._report(root, ws)
-        wb.save(filename=filename)
+        if (filename):
+            wb.save(filename=filename)
         return wb
 
 
