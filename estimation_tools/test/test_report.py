@@ -2,12 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import unittest
-import estimate
-
-# openpyxl is required for xlsx reading
-# doc: http://openpyxl.readthedocs.io/en/default/
-# source: https://bitbucket.org/openpyxl/openpyxl/src/
-import openpyxl
+import estimation_tools.estimate as estimate
 
 def _val(ws, cell):
     v = ws[cell].value
@@ -18,9 +13,7 @@ class ReportTestCase(unittest.TestCase):
 
     @staticmethod
     def _report(name, root, options):
-        fn = ".tmp.%s.xlsx" % name
-        estimate.Processor(options).report(root, filename=fn)
-        wb = openpyxl.load_workbook(filename=fn, read_only=True)
+        wb = estimate.Processor(options).report(root, filename=None)
         names = wb.get_sheet_names()
         return wb[names[0]]
 

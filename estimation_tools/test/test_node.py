@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import unittest
-import estimate
+import estimation_tools.estimate as estimate
 
 class NodeObjectTestCase(unittest.TestCase):
     """Test estimate.Node class"""
