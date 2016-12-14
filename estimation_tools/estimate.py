@@ -17,6 +17,7 @@
 
 #
 # usage: estimate.py [-h] [options] [-o OUTPUT] filename
+# see https://github.com/zhuj/estimation-tools/wiki
 #
 # pre-requirements:
 # * pip install openpyxl (http://openpyxl.readthedocs.io/en/default/, https://bitbucket.org/openpyxl/openpyxl/src/)
@@ -492,7 +493,9 @@ class Processor:
     def _cf_cache(theme):
         """ build cell-format cache """
 
-        _filter_map = lambda map, prefix: { k[len(prefix):]: v for (k, v) in map.items() if k.startswith(prefix) }
+        _filter_map = lambda map, prefix: {
+            k[len(prefix):]: v for (k, v) in map.items() if k.startswith(prefix)
+        }
 
         _cf_font_cache = FormatCache(
             register=lambda f: f and Processor.pyxl.styles.Font(**f) or None
@@ -876,12 +879,12 @@ if __name__ == "__main__":
         help='''use formulas for estimation numbers'''
     )
 
-    # due to the combination of the bugs in libreoffice and xlsxwriter this options are not ready
+    # this option doesn't work for LibreOffice (due to the bug it doesn't recognize initial filter state)
     parser.add_argument(
         '--filter-visibility',
         action='store_true',
         dest=Processor.OPT_FILTER_VISIBILITY,
-        help='''don't hide multiplier/visibility column, use it as a filter instead (EXPERIMENTAL)'''
+        help='''don't hide multiplier/visibility column, use it as a filter instead (doesn't work for LibreOffice)'''
     )
 
     parser.add_argument(

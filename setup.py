@@ -1,36 +1,47 @@
 #!/usr/bin/env python
 
-"""Setup script for packaging estimate-tools.
+"""
+Setup script for packaging estimation-tools:
 
-To build a package for distribution:
+To build a package for distribution (sources):
     python setup.py sdist
-and upload it to the PyPI with:
+
+To build a package for distribution (egg):
+    python setup.py bdist_egg
+
+To upload it to the PyPI with:
     python setup.py upload
 
-Install a link for development work:
-    pip install -e .
+To start test cases:
+    python setup.py test
 
-Thee manifest.in file is used for data files.
+To install a link for development work:
+    pip install -e .
 
 """
 
 import sys
-import os
 import warnings
 
+
+# check python version
 if sys.version_info < (2, 6):
     raise Exception("Python >= 2.6 is required.")
 elif sys.version_info[:2] == (3, 2):
     warnings.warn("Python 3.2 is not supported")
 
 
+# import setup
 try:
     from setuptools import setup, Command
 except ImportError:
     from distutils.core import setup, Command
 
+
+# it wraps 'test' command
 class PyTest(Command):
 
+    # command class must provide 'user_options' attribute (a list of tuples)
     user_options = []
 
     def initialize_options(self):
@@ -45,19 +56,30 @@ class PyTest(Command):
         raise SystemExit(errno)
 
 
+# read readme file
+try:
+    import os
+    here = os.path.abspath(os.path.dirname(__file__))
+    with open(os.path.join(here, 'README.md'), 'r') as f:
+        long_description = f.read()
+except:
+    long_description = ''
+
+
+# let's go
 setup(
     name='estimation-tools',
-    version="0.0.1",
-    description="A Python library to help you to generate an estimation report in xlsx format.",
-    long_description="It could help you to generate a xlsx-report for a scope of work with 'Work breakdown structure' and 'Three-point estimation' techniques.",
+    version="1.0.0",
+    description="A Python tool to generate a work breakdown structured three-point estimation report from mind map file.",
+    long_description=long_description,
     author="Viktor A. Danilov",
     author_email="rjabchikov.zhuj@gmail.com",
     url="https://github.com/zhuj/estimation-tools/wiki",
     license="MIT",
     packages=['estimation_tools'],
     requires=['python (>=2.6.0)'],
-    install_requires=['openpyxl'],
-    tests_require=['openpyxl'],
+    install_requires=['openpyxl (>=2.4.1)'],
+    tests_require=['openpyxl (>=2.4.1)'],
     cmdclass={'test': PyTest},
     scripts=['estimation_tools/estimate.py'],
     classifiers=[
