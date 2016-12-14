@@ -388,7 +388,20 @@ class Processor:
         return Theme(theme)
 
     #
+    @staticmethod
+    def _wrap_options(options):
+
+        if (isinstance(options, dict)):
+            class objectview:
+                def __init__(self, d):
+                    self.__dict__ = d
+            options = objectview(options)
+
+        return options
+
+    #
     def __init__(self, options):
+        options = Processor._wrap_options(options)
         self._theme = Processor._loadTheme(getattr(options, Processor.OPT_THEME, None))
         self._sorting = getattr(options, Processor.OPT_SORTING, False) and True
         self._p99 = getattr(options, Processor.OPT_P_99, False) and True
@@ -519,7 +532,7 @@ class Processor:
                     (side, _filter_map(f, side))
                     for side in ('left', 'right', 'top', 'bottom')
                 )
-                }) or None
+            }) or None
         )
 
         return FormatCache(

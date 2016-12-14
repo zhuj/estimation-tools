@@ -12,7 +12,7 @@ class ReportTestCase(unittest.TestCase):
     """Test reports itselves"""
 
     @staticmethod
-    def _report(name, root, options):
+    def _report(root, options={}):
         wb = estimate.Processor(options).report(root, filename=None)
         names = wb.get_sheet_names()
         return wb[names[0]]
@@ -62,7 +62,7 @@ class ReportTestCase(unittest.TestCase):
 
         # roles (if exists)
         self.assertTrue( row > 1 )
-        while _val(ws, 'A%s' % row).startswith(' - '):
+        while _val(ws, 'A%s' % row).strip().startswith('- '):
             row -= 1
             self.assertTrue( row > 1 )
 
@@ -90,7 +90,7 @@ class ReportTestCase(unittest.TestCase):
         """just check it doesn't throw an exception"""
 
         root = estimate.Node(parent=None, title=None)
-        ReportTestCase._report("simple", root, object())
+        ReportTestCase._report(root)
 
     def test_no_estimates(self):
         """test for simple case without estimates"""
@@ -100,7 +100,7 @@ class ReportTestCase(unittest.TestCase):
         root.append(estimate.Node(parent=root, title="2nd node with no estimate"))
         root.append(estimate.Node(parent=root, title="3rd node with no estimate"))
 
-        ws = ReportTestCase._report("no.estimates", root, object())
+        ws = ReportTestCase._report(root)
 
         data_min, data_max = self._check_header_and_footer(ws)
         self.assertEqual( data_min, 2 )
@@ -125,7 +125,7 @@ class ReportTestCase(unittest.TestCase):
         n3 = estimate.Node(parent=root, title="3rd node")
         root.append(n3)
 
-        ws = ReportTestCase._report("estimate.sort", root, object())
+        ws = ReportTestCase._report(root)
 
         data_min, data_max = self._check_header_and_footer(ws)
         self.assertEqual( data_min, 2 )
@@ -134,3 +134,142 @@ class ReportTestCase(unittest.TestCase):
         self.assertEqual( _val(ws, 'A2').strip(), "2nd node" )
         self.assertEqual( _val(ws, 'A3').strip(), "3rd node" )
         self.assertEqual( _val(ws, 'A4').strip(), "1st node" ) # estimation rows should be in the end
+
+    def _mk_root(self):
+
+        class _node:
+            def __init__(self, parent=None, title=""):
+                if (isinstance(parent, _node)):
+                    parent = parent._n
+
+                self._n = estimate.Node(
+                    parent = parent,
+                    title = title
+                )
+
+                if (parent is not None):
+                    parent.append(self._n)
+
+            def estimate(self, numbers):
+                assert self._n.is_role()
+                assert self._n.parent() is not None
+                self._n.estimate(None, numbers)
+                self._n.parent().estimate(self._n.title(), numbers)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                pass
+
+        with _node(parent=None, title=None) as root:
+            with _node(parent=root, title="1st node") as n1:
+
+                with _node(parent=n1, title="1st subnode") as n1_1:
+
+                    with _node(parent=n1_1, title="subnode A") as n1_1a:
+                        with _node(parent=n1_1a, title="(role1)") as role: role.estimate((1,2,3))
+                        with _node(parent=n1_1a, title="(role2)") as role: role.estimate((2,3,4))
+                        with _node(parent=n1_1a, title="(role3)") as role: role.estimate((3,4,5))
+
+                    with _node(parent=n1_1, title="subnode B") as n1_1b:
+                        with _node(parent=n1_1b, title="(role2)") as role: role.estimate((1,2,3))
+                        with _node(parent=n1_1b, title="(role3)") as role: role.estimate((2,3,4))
+                        with _node(parent=n1_1b, title="(role4)") as role: role.estimate((3,4,5))
+
+                with _node(parent=n1, title="2nd subnode") as n1_2:
+
+                    with _node(parent=n1_2, title="subnode A") as n1_2a:
+                        with _node(parent=n1_2a, title="(role3)") as role: role.estimate((1,2,3))
+                        with _node(parent=n1_2a, title="(role4)") as role: role.estimate((2,3,4))
+                        with _node(parent=n1_2a, title="(role5)") as role: role.estimate((3,4,5))
+
+                    with _node(parent=n1_2, title="subnode B") as n1_2b:
+                        with _node(parent=n1_2b, title="(role4)") as role: role.estimate((1,2,3))
+                        with _node(parent=n1_2b, title="(role5)") as role: role.estimate((2,3,4))
+                        with _node(parent=n1_2b, title="(role1)") as role: role.estimate((3,4,5))
+
+                with _node(parent=n1, title="3rd subnode") as n1_3:
+
+                    with _node(parent=n1_3, title="subnode A") as n1_3a:
+                        with _node(parent=n1_3a, title="(role5)") as role: role.estimate((1,2,3))
+                        with _node(parent=n1_3a, title="(role1)") as role: role.estimate((2,3,4))
+                        with _node(parent=n1_3a, title="(role2)") as role: role.estimate((3,4,5))
+
+                    with _node(parent=n1_3, title="subnode B") as n1_3b:
+                        with _node(parent=n1_3b, title="(role1)") as role: role.estimate((1,2,3))
+                        with _node(parent=n1_3b, title="(role2)") as role: role.estimate((2,3,4))
+                        with _node(parent=n1_3b, title="(role3)") as role: role.estimate((3,4,5))
+
+            with _node(parent=root, title="2nd node") as n2:
+
+                with _node(parent=n2, title="1st subnode") as n2_1:
+                    with _node(parent=n2_1, title="(role21)") as role: role.estimate((1,2,3))
+
+                with _node(parent=n2, title="2nd subnode") as n2_2:
+                    with _node(parent=n2_2, title="(role22)") as role: role.estimate((1,2,3))
+
+                with _node(parent=n2, title="3rd subnode") as n2_3:
+                    with _node(parent=n2_3, title="(role23)") as role: role.estimate((1,2,3))
+
+            with _node(parent=root, title="3rd node") as n3:
+
+                with _node(parent=n3, title="1st subnode") as n3_1:
+                    with _node(parent=n3_1, title="subnode A") as n3_1a:
+                        with _node(parent=n3_1a, title="(role32)") as role: role.estimate((1,2,3))
+                    with _node(parent=n3_1, title="subnode B") as n3_1b:
+                        with _node(parent=n3_1b, title="(role33)") as role: role.estimate((1,2,3))
+
+                with _node(parent=n3, title="2nd subnode") as n3_2:
+                    with _node(parent=n3_2, title="subnode A") as n3_2a:
+                        with _node(parent=n3_2a, title="(role31)") as role: role.estimate((1,2,3))
+                    with _node(parent=n3_2, title="subnode B") as n3_2b:
+                        with _node(parent=n3_2b, title="(role33)") as role: role.estimate((1,2,3))
+
+                with _node(parent=n3, title="3rd subnode") as n3_3:
+                    with _node(parent=n3_3, title="subnode A") as n3_3a:
+                        with _node(parent=n3_3a, title="(role31)") as role: role.estimate((1,2,3))
+                    with _node(parent=n3_3, title="subnode B") as n3_3b:
+                        with _node(parent=n3_3b, title="(role32)") as role: role.estimate((1,2,3))
+
+            # just a strange thing with deep hierarchy too
+            with _node(parent=root, title="...") as n:
+                with _node(parent=n, title="...") as n:
+                    with _node(parent=n, title="...") as n:
+                        with _node(parent=n, title="...") as n:
+                            with _node(parent=n, title="...") as n:
+                                with _node(parent=n, title="...") as n:
+                                    with _node(parent=n, title="...") as n:
+                                        with _node(parent=n, title="...") as n:
+                                            with _node(parent=n, title="...") as n:
+                                                with _node(parent=n, title="...") as n:
+                                                    with _node(parent=n, title="(role)") as role: role.estimate((0,0,0))
+                                    with _node(parent=n, title="...") as n:
+                                        with _node(parent=n, title="(role)") as role: role.estimate((0,0,0))
+                            with _node(parent=n, title="...") as n:
+                                with _node(parent=n, title="...") as n:
+                                    with _node(parent=n, title="...") as n:
+                                        with _node(parent=n, title="...") as n:
+                                            with _node(parent=n, title="(role)") as role: role.estimate((0,0,0))
+                                    
+
+            return root._n
+
+    def _test_options(self, options):
+        ws = ReportTestCase._report(root=self._mk_root(), options=options)
+        self._check_header_and_footer(ws)
+
+    def test_options__sorting(self):
+        self._test_options({ estimate.Processor.OPT_ROLES: True, estimate.Processor.OPT_SORTING: True })
+
+    def test_options__p99(self):
+        self._test_options({ estimate.Processor.OPT_ROLES: True, estimate.Processor.OPT_P_99: True })
+
+    def test_options__p99nr(self):
+        self._test_options({ estimate.Processor.OPT_ROLES: False, estimate.Processor.OPT_P_99: True })
+
+    def test_options__formulas(self):
+        self._test_options({ estimate.Processor.OPT_ROLES: True, estimate.Processor.OPT_FORMULAS: True })
+
+    def test_options__filtering(self):
+        self._test_options({ estimate.Processor.OPT_ROLES: True, estimate.Processor.OPT_FORMULAS: True, estimate.Processor.OPT_FILTER_VISIBILITY: True })

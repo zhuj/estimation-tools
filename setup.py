@@ -76,7 +76,7 @@ setup(
     author_email="rjabchikov.zhuj@gmail.com",
     url="https://github.com/zhuj/estimation-tools/wiki",
     license="MIT",
-    packages=['estimation_tools'],
+    packages=[], # Maybe later: packages=['estimation_tools'],
     requires=['python (>=2.6.0)'],
     install_requires=['openpyxl (>=2.4.1)'],
     tests_require=['openpyxl (>=2.4.1)'],
