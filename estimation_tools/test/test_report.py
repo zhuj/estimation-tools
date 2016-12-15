@@ -21,7 +21,7 @@ class ReportTestCase(unittest.TestCase):
         self.assertEqual( (ws.min_column, ws.min_row), (1, 1) )
         self.assertEqual( _val(ws, 'A1'), 'Task / Subtask' )
         self.assertEqual( _val(ws, 'B1'), 'Filter' )
-        self.assertEqual( _val(ws, 'C1'), '' )
+        if ( _val(ws, 'C1') != 'MVP' ): self.assertEqual( _val(ws, 'C1'), '' )
         self.assertEqual( _val(ws, 'D1'), 'Comment' )
         self.assertEqual( _val(ws, 'E1'), 'Min' )
         self.assertEqual( _val(ws, 'F1'), 'Real' )
@@ -59,6 +59,16 @@ class ReportTestCase(unittest.TestCase):
         self.assertTrue( row > 1 )
         self.assertTrue( _val(ws, 'A%s' % row) == '' )
         row -= 1
+
+        # total (mvp), optional
+        self.assertTrue( row > 1 )
+        if ( _val(ws, 'A%s' % row).startswith('Total (MVP)') ):
+            row -= 1
+
+            # separator
+            self.assertTrue( row > 1 )
+            self.assertTrue( _val(ws, 'A%s' % row) == '' )
+            row -= 1
 
         # roles (if exists)
         self.assertTrue( row > 1 )
@@ -136,6 +146,7 @@ class ReportTestCase(unittest.TestCase):
         self.assertEqual( _val(ws, 'A4').strip(), "1st node" ) # estimation rows should be in the end
 
     def _mk_root(self):
+        """ it creates a complex node tree for the following testing """
 
         class _node:
             def __init__(self, parent=None, title=""):
@@ -257,7 +268,8 @@ class ReportTestCase(unittest.TestCase):
 
     def _test_options(self, options):
         ws = ReportTestCase._report(root=self._mk_root(), options=options)
-        self._check_header_and_footer(ws)
+        self._check_header_and_footer(ws) # basic document structure test (nothing has been lost)
+        # todo: implement additional checks
 
     def test_options__sorting(self):
         self._test_options({ estimate.Processor.OPT_ROLES: True, estimate.Processor.OPT_SORTING: True })
@@ -273,3 +285,12 @@ class ReportTestCase(unittest.TestCase):
 
     def test_options__filtering(self):
         self._test_options({ estimate.Processor.OPT_ROLES: True, estimate.Processor.OPT_FORMULAS: True, estimate.Processor.OPT_FILTER_VISIBILITY: True })
+
+    def test_options__mvp(self):
+        self._test_options({
+            estimate.Processor.OPT_MVP: True,
+            estimate.Processor.OPT_ROLES: True,
+            estimate.Processor.OPT_FORMULAS: True,
+            estimate.Processor.OPT_FILTER_VISIBILITY: True
+        })
+

@@ -1,5 +1,5 @@
-usage: estimate.py [-h] [--theme THEME] [--sort] [--p99] [--no-roles]
-                   [--formulas] [--filter-visibility] [-o OUTPUT]
+usage: estimate.py [-h] [--theme THEME] [--sort] [--p99] [--no-mvp]
+                   [--no-roles] [--formulas] [--filter-visibility] [-o OUTPUT]
                    filename
 
 Converts freemind estimation to xlsx report.
@@ -12,8 +12,9 @@ optional arguments:
   --theme THEME        use a given .py file as a theme
   --sort, -s           sort children nodes by title
   --p99                use P=99% instead of P=95%
+  --no-mvp             don't add MVP features
   --no-roles           don't provide estimation details for each role
   --formulas           use formulas for estimation numbers
   --filter-visibility  don't hide multiplier/visibility column, use it as a
-                       filter instead (EXPERIMENTAL)
+                       filter instead (doesn't work for LibreOffice)
   -o OUTPUT            out file name
