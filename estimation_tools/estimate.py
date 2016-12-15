@@ -856,6 +856,9 @@ class Processor:
             p_title = "P=95%"
             p_multiplier = 2
 
+        if (self._mvp):
+            p_title = "MVP, %s" % p_title
+
         # Min (P=95/99%)
         row_footer += 1
         _string('A', row_footer, 'Min (%s)' % p_title, f_total)  # A (caption)
@@ -912,10 +915,10 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        '--no-mvp',
-        action='store_false',
+        '--mvp',
+        action='store_true',
         dest=Processor.OPT_MVP,
-        help='''don't add MVP features'''
+        help='''add MVP features'''
     )
 
     parser.add_argument(
