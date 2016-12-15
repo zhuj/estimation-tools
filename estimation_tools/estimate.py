@@ -222,6 +222,10 @@ class Theme:
         'num_format': '0.00'
     }
 
+    # default boolean format
+    DEFAULT_F_BOOLEAN = {
+    }
+
     # default number format
     DEFAULT_F_ESTIMATES = lambda self: self._merge_format(self.F_NUMBERS, {
         'font_bold': True
@@ -359,6 +363,7 @@ class Processor:
     OPT_THEME = 'theme'
     OPT_SORTING = 'sorting'
     OPT_P_99 = 'p99'
+    OPT_MVP = 'mvp'
     OPT_ROLES = 'roles'
     OPT_FORMULAS = 'formulas'
     OPT_FILTER_VISIBILITY = 'filter_visibility'
@@ -404,6 +409,7 @@ class Processor:
         options = Processor._wrap_options(options)
         self._theme = Processor._loadTheme(getattr(options, Processor.OPT_THEME, None))
         self._sorting = getattr(options, Processor.OPT_SORTING, False) and True
+        self._mvp = getattr(options, Processor.OPT_MVP, False) and True
         self._p99 = getattr(options, Processor.OPT_P_99, False) and True
         self._roles = getattr(options, Processor.OPT_ROLES, False) and True
         self._formulas = self._roles and (getattr(options, Processor.OPT_FORMULAS, False) and True)
@@ -576,6 +582,7 @@ class Processor:
         def _string(c, r, string, *f): _apply_format(ws[cell(c, r)], *f).value = string
         def _number(c, r, number, *f): _apply_format(ws[cell(c, r)], self._theme.F_NUMBERS, *f).value = number
         def _formula(c, r, formula, *f): _apply_format(ws[cell(c, r)], self._theme.F_NUMBERS, *f).value = formula
+        def _boolean(c, r, bool, *f): _apply_format(ws[cell(c, r)], self._theme.F_BOOLEAN, *f).value = (bool and 1 or 0)
         def _blank(c, r, *f): _string(c, r, '', *f)
 
         # init format (style) table
@@ -613,7 +620,7 @@ class Processor:
         f_header = self._theme.F_HEADER
         _string('A', row, 'Task / Subtask', f_header)  # A: caption
         _string('B', row, 'Filter', f_header)          # B: visibility
-        _string('C', row, '', f_header)                # C: empty
+        _string('C', row, '', f_header)                # C: empty/MVP
         _string('D', row, 'Comment', f_header)         # D: comment
         _string('E', row, 'Min', f_header)             # E: estimate
         _string('F', row, 'Real', f_header)            # F: estimate
@@ -622,6 +629,9 @@ class Processor:
         _string('I', row, 'Avg', f_header)             # I: weighted mean
         _string('J', row, 'SD', f_header)              # J: standard deviation
         _string('K', row, 'Sq', f_header)              # K: squared deviation
+
+        if (self._mvp):
+            _string('C', row, 'MVP', f_header) # C: MVP
 
         # ------------------------
         # start the transformation
@@ -658,7 +668,7 @@ class Processor:
                 # fill with values
                 _string('A', row, l.title_with_level(), f_role)  # A (title)
                 _number('B', row, 0, f_role, f_multiplier)       # B (visibility/multiplier)
-                _blank('C', row, f_role)                         # C (empty)
+                _blank('C', row, f_role)                         # C (empty/MVP)
                 _string('D', row, '', f_role)                    # D (comment)
                 if (estimates is not None):
                     _number('E', row, estimates[0], f_role)      # E (estimate)
@@ -682,11 +692,12 @@ class Processor:
             # multiplier will be used in SUMPRODUCT formulas:
             # true means it's a raw data for formulas - we have to use it
             multiplier = (not role) and (estimates is not None)
+            mvp = multiplier and self._mvp and True
 
             # let's fill the row with data
             _string('A', row, l.title_with_level(), f_row)                            # A (title)
             _blank('B', row, f_row, f_multiplier)                                     # B (visibility/multiplier)
-            _blank('C', row, f_row)                                                   # C (empty)
+            _blank('C', row, f_row)                                                   # C (empty/MVP)
             _string('D', row, ';\n'.join(l.annotation('comment')), f_row, f_comment)  # D (comment)
             _string('E', row, '', f_row)                                              # E (estimate)
             _string('F', row, '', f_row)                                              # F (estimate)
@@ -698,9 +709,12 @@ class Processor:
 
             # setup visibility/multiplier
             if (multiplier):
-                _number('B', row, 1, f_row, f_multiplier)    # B (visibility/multiplier)
+                _number('B', row, 1, f_row, f_multiplier) # B (visibility/multiplier)
 
             if (estimates is not None):
+                if (self._mvp):
+                    _boolean('C', row, mvp, f_row) # C (MVP)
+
                 _number('E', row, estimates[0], f_row, f_estimates)               # E (estimate)
                 _number('F', row, estimates[1], f_row, f_estimates)               # F (estimate)
                 _number('G', row, estimates[2], f_row, f_estimates)               # G (estimate)
@@ -747,7 +761,6 @@ class Processor:
         # calculate ranges & apply filtering
         row_lines = row_lines.values()
         row_lines = (min(row_lines), max(max(row_lines), row_footer))
-        row_multiplier = cells('B', row_lines)
 
         # set up autofilters (in headers)
         ws.auto_filter.ref = '%s:%s' % (cell('A', 0), cell('K', row_footer))
@@ -757,20 +770,21 @@ class Processor:
         # ------
         # footer
 
-        # total values (it uses row_multiplier to avoid duuble calculations for roles)
+        # total values (it uses row_mul to avoid duuble calculations for roles)
+        row_mul = cells('B', row_lines)
         row_footer += 1
         row_total = row_footer
-        _string('A', row_total, 'Total', f_total)                                                                        # A (caption)
-        _string('B', row_total, '', f_total)                                                                             # B (hidden)
-        _string('C', row_total, '', f_total)                                                                             # C
-        _string('D', row_total, '', f_total)                                                                             # D
-        _formula('E', row_total, '=SUMPRODUCT(%s,%s)' % (cells('E', row_lines), row_multiplier), f_total, f_estimates)   # E (sum)
-        _formula('F', row_total, '=SUMPRODUCT(%s,%s)' % (cells('F', row_lines), row_multiplier), f_total, f_estimates)   # F (sum)
-        _formula('G', row_total, '=SUMPRODUCT(%s,%s)' % (cells('G', row_lines), row_multiplier), f_total, f_estimates)   # G (sum)
-        _string('H', row_total, '', f_total)                                                                             # H
-        _formula('I', row_total, '=SUMPRODUCT(%s,%s)' % (cells('I', row_lines), row_multiplier), f_total, f_estimates)   # I (sum)
-        _formula('J', row_total, '=SUMPRODUCT(%s,%s)' % (cells('J', row_lines), row_multiplier), f_total, f_estimates)   # J (sum)
-        _formula('K', row_total, '=SUMPRODUCT(%s,%s)' % (cells('K', row_lines), row_multiplier), f_total, f_estimates)   # K (sum)
+        _string('A', row_total, 'Total', f_total)                                                                 # A (caption)
+        _string('B', row_total, '', f_total)                                                                      # B (hidden)
+        _string('C', row_total, '', f_total)                                                                      # C
+        _string('D', row_total, '', f_total)                                                                      # D
+        _formula('E', row_total, '=SUMPRODUCT(%s,%s)' % (cells('E', row_lines), row_mul), f_total, f_estimates)   # E (sum)
+        _formula('F', row_total, '=SUMPRODUCT(%s,%s)' % (cells('F', row_lines), row_mul), f_total, f_estimates)   # F (sum)
+        _formula('G', row_total, '=SUMPRODUCT(%s,%s)' % (cells('G', row_lines), row_mul), f_total, f_estimates)   # G (sum)
+        _string('H', row_total, '', f_total)                                                                      # H
+        _formula('I', row_total, '=SUMPRODUCT(%s,%s)' % (cells('I', row_lines), row_mul), f_total, f_estimates)   # I (sum)
+        _formula('J', row_total, '=SUMPRODUCT(%s,%s)' % (cells('J', row_lines), row_mul), f_total, f_estimates)   # J (sum)
+        _formula('K', row_total, '=SUMPRODUCT(%s,%s)' % (cells('K', row_lines), row_mul), f_total, f_estimates)   # K (sum)
 
         # total values for each role, if it's required
         if (self._roles):
@@ -789,15 +803,34 @@ class Processor:
                 for role_row in role_rows:
                     _number(role_column, role_row, 1)
 
-                role_multiplier = cells(role_column, row_lines)
-                _string('A', row_footer, '  - %s' % role.strip('()'), f_total)                                                   # A (caption)
-                _string('B', row_footer, '', f_total)                                                                            # B (hidden)
-                _string('C', row_footer, '', f_total)                                                                            # C
-                _string('D', row_footer, '', f_total)                                                                            # D
-                _formula('E', row_footer, '=SUMPRODUCT(%s,%s)' % (cells('E', row_lines), role_multiplier), f_total, f_estimates) # E (sum)
-                _formula('F', row_footer, '=SUMPRODUCT(%s,%s)' % (cells('F', row_lines), role_multiplier), f_total, f_estimates) # F (sum)
-                _formula('G', row_footer, '=SUMPRODUCT(%s,%s)' % (cells('G', row_lines), role_multiplier), f_total, f_estimates) # G (sum)
+                role_mul = cells(role_column, row_lines)
+                _string('A', row_footer, '  - %s' % role.strip('()'), f_total)                                            # A (caption)
+                _string('B', row_footer, '', f_total)                                                                     # B (hidden)
+                _string('C', row_footer, '', f_total)                                                                     # C
+                _string('D', row_footer, '', f_total)                                                                     # D
+                _formula('E', row_footer, '=SUMPRODUCT(%s,%s)' % (cells('E', row_lines), role_mul), f_total, f_estimates) # E (sum)
+                _formula('F', row_footer, '=SUMPRODUCT(%s,%s)' % (cells('F', row_lines), role_mul), f_total, f_estimates) # F (sum)
+                _formula('G', row_footer, '=SUMPRODUCT(%s,%s)' % (cells('G', row_lines), role_mul), f_total, f_estimates) # G (sum)
 
+        if (self._mvp):
+            # one extra line
+            row_footer += 1
+
+            # total (mvp) values (it uses row_mul and row_mvp to avoid duuble calculations for roles)
+            row_mvp = cells('C', row_lines)
+            row_footer += 1
+            row_total = row_footer
+            _string('A', row_total, 'Total (MVP)', f_total)                                                                       # A (caption)
+            _string('B', row_total, '', f_total)                                                                                  # B (hidden)
+            _string('C', row_total, '', f_total)                                                                                  # C
+            _string('D', row_total, '', f_total)                                                                                  # D
+            _formula('E', row_total, '=SUMPRODUCT(%s,%s,%s)' % (cells('E', row_lines), row_mul, row_mvp), f_total, f_estimates)   # E (sum)
+            _formula('F', row_total, '=SUMPRODUCT(%s,%s,%s)' % (cells('F', row_lines), row_mul, row_mvp), f_total, f_estimates)   # F (sum)
+            _formula('G', row_total, '=SUMPRODUCT(%s,%s,%s)' % (cells('G', row_lines), row_mul, row_mvp), f_total, f_estimates)   # G (sum)
+            _string('H', row_total, '', f_total)                                                                                  # H
+            _formula('I', row_total, '=SUMPRODUCT(%s,%s,%s)' % (cells('I', row_lines), row_mul, row_mvp), f_total, f_estimates)   # I (sum)
+            _formula('J', row_total, '=SUMPRODUCT(%s,%s,%s)' % (cells('J', row_lines), row_mul, row_mvp), f_total, f_estimates)   # J (sum)
+            _formula('K', row_total, '=SUMPRODUCT(%s,%s,%s)' % (cells('K', row_lines), row_mul, row_mvp), f_total, f_estimates)   # K (sum)
 
         # one extra line
         row_footer += 1
@@ -876,6 +909,13 @@ if __name__ == "__main__":
         action='store_true',
         dest=Processor.OPT_P_99,
         help='''use P=99%% instead of P=95%%'''
+    )
+
+    parser.add_argument(
+        '--no-mvp',
+        action='store_false',
+        dest=Processor.OPT_MVP,
+        help='''don't add MVP features'''
     )
 
     parser.add_argument(
