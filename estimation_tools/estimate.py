@@ -918,7 +918,7 @@ if __name__ == "__main__":
         '--mvp',
         action='store_true',
         dest=Processor.OPT_MVP,
-        help='''add MVP features'''
+        help='''add Minimum Viable Product (MVP) features'''
     )
 
     parser.add_argument(
