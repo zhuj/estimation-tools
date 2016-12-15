@@ -267,30 +267,40 @@ class ReportTestCase(unittest.TestCase):
             return root._n
 
     def _test_options(self, options):
+        options = dict({
+            estimate.Processor.OPT_ROLES: True,
+            estimate.Processor.OPT_VALIDATION: True,
+        }, **options)
         ws = ReportTestCase._report(root=self._mk_root(), options=options)
         self._check_header_and_footer(ws) # basic document structure test (nothing has been lost)
         # todo: implement additional checks
 
     def test_options__sorting(self):
-        self._test_options({ estimate.Processor.OPT_ROLES: True, estimate.Processor.OPT_SORTING: True })
+        self._test_options({ estimate.Processor.OPT_SORTING: True })
 
     def test_options__p99(self):
-        self._test_options({ estimate.Processor.OPT_ROLES: True, estimate.Processor.OPT_P_99: True })
+        self._test_options({ estimate.Processor.OPT_P_99: True })
 
     def test_options__p99nr(self):
         self._test_options({ estimate.Processor.OPT_ROLES: False, estimate.Processor.OPT_P_99: True })
 
     def test_options__formulas(self):
-        self._test_options({ estimate.Processor.OPT_ROLES: True, estimate.Processor.OPT_FORMULAS: True })
+        self._test_options({ estimate.Processor.OPT_FORMULAS: True })
 
     def test_options__filtering(self):
-        self._test_options({ estimate.Processor.OPT_ROLES: True, estimate.Processor.OPT_FORMULAS: True, estimate.Processor.OPT_FILTER_VISIBILITY: True })
+        self._test_options({ estimate.Processor.OPT_FORMULAS: True, estimate.Processor.OPT_FILTER_VISIBILITY: True })
 
-    def test_options__mvp(self):
+    def test_options__mvp_full(self):
         self._test_options({
             estimate.Processor.OPT_MVP: True,
-            estimate.Processor.OPT_ROLES: True,
             estimate.Processor.OPT_FORMULAS: True,
             estimate.Processor.OPT_FILTER_VISIBILITY: True
         })
 
+    def test_options__mvp_no_validation(self):
+        self._test_options({
+            estimate.Processor.OPT_MVP: True,
+            estimate.Processor.OPT_FORMULAS: True,
+            estimate.Processor.OPT_FILTER_VISIBILITY: True,
+            estimate.Processor.OPT_VALIDATION: False
+        })

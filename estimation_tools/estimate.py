@@ -365,6 +365,7 @@ class Processor:
     OPT_P_99 = 'p99'
     OPT_MVP = 'mvp'
     OPT_ROLES = 'roles'
+    OPT_VALIDATION = 'validation'
     OPT_FORMULAS = 'formulas'
     OPT_FILTER_VISIBILITY = 'filter_visibility'
 
@@ -409,6 +410,7 @@ class Processor:
         options = Processor._wrap_options(options)
         self._theme = Processor._loadTheme(getattr(options, Processor.OPT_THEME, None))
         self._sorting = getattr(options, Processor.OPT_SORTING, False) and True
+        self._validation = getattr(options, Processor.OPT_VALIDATION, False) and True
         self._mvp = getattr(options, Processor.OPT_MVP, False) and True
         self._p99 = getattr(options, Processor.OPT_P_99, False) and True
         self._roles = getattr(options, Processor.OPT_ROLES, False) and True
@@ -553,7 +555,7 @@ class Processor:
         )
 
 
-#
+    #
     def _report(self, root, ws):
         # see https://en.wikipedia.org/wiki/Three-point_estimation
 
@@ -634,6 +636,41 @@ class Processor:
             _string('C', row, 'MVP', f_header) # C: MVP
 
         # ------------------------
+        # prepare data validation
+
+        # validation for B (multiplier) and C (mvp)
+        _hide_column('Z', hidden=True)     # hide Z
+        _blank('Z', 0, f_multiplier)       # Z1 = empty
+        _number('Z', 1, 0, f_multiplier)   # Z2 = 0
+        _number('Z', 2, 1, f_multiplier)   # Z3 = 1
+
+        # multiplier
+        # XXX: note, the validation here is general only (for the whole column)
+        # XXX: the idea is that user wants to control which lines are raw data source and which are representation only
+        dv_mul_list = Processor.pyxl.worksheet.datavalidation.DataValidation(
+            type="list",
+            formula1='$Z$1:$Z$3', # '', 0, 1
+            allow_blank=True
+        )
+        dv_mul_list.hide_drop_down = True
+
+        # mvp (selecatable)
+        dv_mvp_list = Processor.pyxl.worksheet.datavalidation.DataValidation(
+            type="list",
+            formula1='$Z$2:$Z$3', # 0, 1
+            allow_blank=False
+        )
+        dv_mvp_list.hide_drop_down = False
+
+        # mvp (empty only)
+        dv_mvp_empty = Processor.pyxl.worksheet.datavalidation.DataValidation(
+            type="list",
+            formula1="", # none
+            allow_blank=True
+        )
+        dv_mvp_empty.hide_drop_down = True
+
+        # ------------------------
         # start the transformation
 
         # lines
@@ -651,6 +688,13 @@ class Processor:
 
             # obtain estimations for the row (total, aggregated from the node and its roles)
             estimates = l.estimates()
+
+            # mvp
+            if (self._mvp):
+                if (estimates is not None):
+                    dv_mvp_list.ranges.append(cells('C', (row, row)))
+                else:
+                    dv_mvp_empty.ranges.append(cells('C', (row, row)))
 
             # ----------------------
             # special case for roles (they are just info rows)
@@ -762,6 +806,14 @@ class Processor:
         row_lines = row_lines.values()
         row_lines = (min(row_lines), max(max(row_lines), row_footer))
 
+        # data validation (multiplier/filter and mvp, if enabled)
+        if (self._validation):
+            dv_mul_list.ranges.append(cells('B', row_lines))
+            ws.add_data_validation(dv_mul_list)
+            if (self._mvp):
+                ws.add_data_validation(dv_mvp_empty)
+                ws.add_data_validation(dv_mvp_list)
+
         # set up autofilters (in headers)
         ws.auto_filter.ref = '%s:%s' % (cell('A', 0), cell('K', row_footer))
         if (self._filter_visibility):
@@ -770,21 +822,26 @@ class Processor:
         # ------
         # footer
 
-        # total values (it uses row_mul to avoid duuble calculations for roles)
-        row_mul = cells('B', row_lines)
-        row_footer += 1
-        row_total = row_footer
-        _string('A', row_total, 'Total', f_total)                                                                 # A (caption)
-        _string('B', row_total, '', f_total)                                                                      # B (hidden)
-        _string('C', row_total, '', f_total)                                                                      # C
-        _string('D', row_total, '', f_total)                                                                      # D
-        _formula('E', row_total, '=SUMPRODUCT(%s,%s)' % (cells('E', row_lines), row_mul), f_total, f_estimates)   # E (sum)
-        _formula('F', row_total, '=SUMPRODUCT(%s,%s)' % (cells('F', row_lines), row_mul), f_total, f_estimates)   # F (sum)
-        _formula('G', row_total, '=SUMPRODUCT(%s,%s)' % (cells('G', row_lines), row_mul), f_total, f_estimates)   # G (sum)
-        _string('H', row_total, '', f_total)                                                                      # H
-        _formula('I', row_total, '=SUMPRODUCT(%s,%s)' % (cells('I', row_lines), row_mul), f_total, f_estimates)   # I (sum)
-        _formula('J', row_total, '=SUMPRODUCT(%s,%s)' % (cells('J', row_lines), row_mul), f_total, f_estimates)   # J (sum)
-        _formula('K', row_total, '=SUMPRODUCT(%s,%s)' % (cells('K', row_lines), row_mul), f_total, f_estimates)   # K (sum)
+        def _total(row_total, caption='Total', row_mul=cells('B', row_lines)):
+            # total values (it uses row_mul to avoid duuble calculations for roles)
+            _string('A', row_total, caption, f_total)                                                                 # A (caption)
+            _string('B', row_total, '', f_total)                                                                      # B (hidden)
+            _string('C', row_total, '', f_total)                                                                      # C
+            _string('D', row_total, '', f_total)                                                                      # D
+            _formula('E', row_total, '=SUMPRODUCT(%s,%s)' % (cells('E', row_lines), row_mul), f_total, f_estimates)   # E (sum)
+            _formula('F', row_total, '=SUMPRODUCT(%s,%s)' % (cells('F', row_lines), row_mul), f_total, f_estimates)   # F (sum)
+            _formula('G', row_total, '=SUMPRODUCT(%s,%s)' % (cells('G', row_lines), row_mul), f_total, f_estimates)   # G (sum)
+            _string('H', row_total, '', f_total)                                                                      # H
+            _formula('I', row_total, '=SUMPRODUCT(%s,%s)' % (cells('I', row_lines), row_mul), f_total, f_estimates)   # I (sum)
+            _formula('J', row_total, '=SUMPRODUCT(%s,%s)' % (cells('J', row_lines), row_mul), f_total, f_estimates)   # J (sum)
+            _formula('K', row_total, '=SUMPRODUCT(%s,%s)' % (cells('K', row_lines), row_mul), f_total, f_estimates)   # K (sum)
+            return row_total
+
+        # total values (all)
+        row_total = row_footer = _total(
+            row_total=row_footer + 1,
+            caption=(self._mvp and 'Total (All)' or 'Total')
+        )
 
         # total values for each role, if it's required
         if (self._roles):
@@ -816,21 +873,13 @@ class Processor:
             # one extra line
             row_footer += 1
 
-            # total (mvp) values (it uses row_mul and row_mvp to avoid duuble calculations for roles)
-            row_mvp = cells('C', row_lines)
-            row_footer += 1
-            row_total = row_footer
-            _string('A', row_total, 'Total (MVP)', f_total)                                                                       # A (caption)
-            _string('B', row_total, '', f_total)                                                                                  # B (hidden)
-            _string('C', row_total, '', f_total)                                                                                  # C
-            _string('D', row_total, '', f_total)                                                                                  # D
-            _formula('E', row_total, '=SUMPRODUCT(%s,%s,%s)' % (cells('E', row_lines), row_mul, row_mvp), f_total, f_estimates)   # E (sum)
-            _formula('F', row_total, '=SUMPRODUCT(%s,%s,%s)' % (cells('F', row_lines), row_mul, row_mvp), f_total, f_estimates)   # F (sum)
-            _formula('G', row_total, '=SUMPRODUCT(%s,%s,%s)' % (cells('G', row_lines), row_mul, row_mvp), f_total, f_estimates)   # G (sum)
-            _string('H', row_total, '', f_total)                                                                                  # H
-            _formula('I', row_total, '=SUMPRODUCT(%s,%s,%s)' % (cells('I', row_lines), row_mul, row_mvp), f_total, f_estimates)   # I (sum)
-            _formula('J', row_total, '=SUMPRODUCT(%s,%s,%s)' % (cells('J', row_lines), row_mul, row_mvp), f_total, f_estimates)   # J (sum)
-            _formula('K', row_total, '=SUMPRODUCT(%s,%s,%s)' % (cells('K', row_lines), row_mul, row_mvp), f_total, f_estimates)   # K (sum)
+            # total (mvp) values
+            # next calculation will use this row as a basis
+            row_total = row_footer = _total(
+                row_total=row_footer + 1,
+                caption='Total (MVP)',
+                row_mul="%s,%s" % (cells('B', row_lines), cells('C', row_lines))
+            )
 
         # one extra line
         row_footer += 1
@@ -919,6 +968,13 @@ if __name__ == "__main__":
         action='store_true',
         dest=Processor.OPT_MVP,
         help='''add Minimum Viable Product (MVP) features'''
+    )
+
+    parser.add_argument(
+        '--no-data-validation',
+        action='store_false',
+        dest=Processor.OPT_VALIDATION,
+        help='''don't apply data validation for filter and MVP column'''
     )
 
     parser.add_argument(
