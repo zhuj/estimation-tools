@@ -12,7 +12,9 @@ if true; then
  python $E --formulas 'Estimation Tool.mm' -o 'Estimation Tool.mm.f.xlsx'
  python $E --filter-visibility --formulas --p99 'Estimation Tool.mm' -o 'Estimation Tool.mm.filter.xlsx'
  python $E --theme themes.light --formulas 'Estimation Tool.mm' -o 'Estimation Tool.mm.light.xlsx'
- python $E --formulas --mvp 'Estimation Tool.mm' -o 'Estimation Tool.mm.mvp.xlsx'
+ python $E --filter-visibility --mvp 'Estimation Tool.mm' -o 'Estimation Tool.mm.mvp.xlsx'
+ python $E --filter-visibility --formulas --mvp 'Estimation Tool.mm' -o 'Estimation Tool.mm.mvp.f.xlsx'
+ python $E --filter-visibility --formulas --mvp --no-data-validation 'Estimation Tool.mm' -o 'Estimation Tool.mm.mvp.nv.xlsx'
  python $E --formulas 'Estimation Tool.deep.mm' -o 'Estimation Tool.mm.deep.xlsx'
 fi
 
