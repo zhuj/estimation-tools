@@ -174,9 +174,10 @@ class ReportTestCase(unittest.TestCase):
                 pass
 
         with _node(parent=None, title=None) as root:
-            with _node(parent=root, title="1st node") as n1:
 
-                with _node(parent=n1, title="1st subnode") as n1_1:
+            with _node(parent=root, title="C. 1st node") as n1:
+
+                with _node(parent=n1, title="ZA. 1st subnode") as n1_1:
 
                     with _node(parent=n1_1, title="subnode A") as n1_1a:
                         with _node(parent=n1_1a, title="(role1)") as role: role.estimate((1,2,3))
@@ -188,7 +189,7 @@ class ReportTestCase(unittest.TestCase):
                         with _node(parent=n1_1b, title="(role3)") as role: role.estimate((2,3,4))
                         with _node(parent=n1_1b, title="(role4)") as role: role.estimate((3,4,5))
 
-                with _node(parent=n1, title="2nd subnode") as n1_2:
+                with _node(parent=n1, title="YA. 2nd subnode") as n1_2:
 
                     with _node(parent=n1_2, title="subnode A") as n1_2a:
                         with _node(parent=n1_2a, title="(role3)") as role: role.estimate((1,2,3))
@@ -200,7 +201,7 @@ class ReportTestCase(unittest.TestCase):
                         with _node(parent=n1_2b, title="(role5)") as role: role.estimate((2,3,4))
                         with _node(parent=n1_2b, title="(role1)") as role: role.estimate((3,4,5))
 
-                with _node(parent=n1, title="3rd subnode") as n1_3:
+                with _node(parent=n1, title="XA. 3rd subnode") as n1_3:
 
                     with _node(parent=n1_3, title="subnode A") as n1_3a:
                         with _node(parent=n1_3a, title="(role5)") as role: role.estimate((1,2,3))
@@ -212,32 +213,32 @@ class ReportTestCase(unittest.TestCase):
                         with _node(parent=n1_3b, title="(role2)") as role: role.estimate((2,3,4))
                         with _node(parent=n1_3b, title="(role3)") as role: role.estimate((3,4,5))
 
-            with _node(parent=root, title="2nd node") as n2:
+            with _node(parent=root, title="B. 2nd node") as n2:
 
-                with _node(parent=n2, title="1st subnode") as n2_1:
+                with _node(parent=n2, title="BZ. 1st subnode") as n2_1:
                     with _node(parent=n2_1, title="(role21)") as role: role.estimate((1,2,3))
 
-                with _node(parent=n2, title="2nd subnode") as n2_2:
+                with _node(parent=n2, title="BY. 2nd subnode") as n2_2:
                     with _node(parent=n2_2, title="(role22)") as role: role.estimate((1,2,3))
 
-                with _node(parent=n2, title="3rd subnode") as n2_3:
+                with _node(parent=n2, title="BX. 3rd subnode") as n2_3:
                     with _node(parent=n2_3, title="(role23)") as role: role.estimate((1,2,3))
 
-            with _node(parent=root, title="3rd node") as n3:
+            with _node(parent=root, title="A. 3rd node") as n3:
 
-                with _node(parent=n3, title="1st subnode") as n3_1:
+                with _node(parent=n3, title="3) 1st subnode") as n3_1:
                     with _node(parent=n3_1, title="subnode A") as n3_1a:
                         with _node(parent=n3_1a, title="(role32)") as role: role.estimate((1,2,3))
                     with _node(parent=n3_1, title="subnode B") as n3_1b:
                         with _node(parent=n3_1b, title="(role33)") as role: role.estimate((1,2,3))
 
-                with _node(parent=n3, title="2nd subnode") as n3_2:
+                with _node(parent=n3, title="2) 2nd subnode") as n3_2:
                     with _node(parent=n3_2, title="subnode A") as n3_2a:
                         with _node(parent=n3_2a, title="(role31)") as role: role.estimate((1,2,3))
                     with _node(parent=n3_2, title="subnode B") as n3_2b:
                         with _node(parent=n3_2b, title="(role33)") as role: role.estimate((1,2,3))
 
-                with _node(parent=n3, title="3rd subnode") as n3_3:
+                with _node(parent=n3, title="1) 3rd subnode") as n3_3:
                     with _node(parent=n3_3, title="subnode A") as n3_3a:
                         with _node(parent=n3_3a, title="(role31)") as role: role.estimate((1,2,3))
                     with _node(parent=n3_3, title="subnode B") as n3_3b:
@@ -272,35 +273,65 @@ class ReportTestCase(unittest.TestCase):
             estimate.Processor.OPT_VALIDATION: True,
         }, **options)
         ws = ReportTestCase._report(root=self._mk_root(), options=options)
-        self._check_header_and_footer(ws) # basic document structure test (nothing has been lost)
+        d0, d1 = self._check_header_and_footer(ws) # basic document structure test (nothing has been lost)
         # todo: implement additional checks
-
-    def test_options__sorting(self):
-        self._test_options({ estimate.Processor.OPT_SORTING: True })
+        return ws, d0, d1
 
     def test_options__p99(self):
-        self._test_options({ estimate.Processor.OPT_P_99: True })
+        ws, d0, d1 = self._test_options({
+            estimate.Processor.OPT_P_99: True
+        })
+        # todo: implement specific tests
 
     def test_options__p99nr(self):
-        self._test_options({ estimate.Processor.OPT_ROLES: False, estimate.Processor.OPT_P_99: True })
+        ws, d0, d1 = self._test_options({
+            estimate.Processor.OPT_ROLES: False,
+            estimate.Processor.OPT_P_99: True
+        })
+        # todo: implement specific tests
 
     def test_options__formulas(self):
-        self._test_options({ estimate.Processor.OPT_FORMULAS: True })
+        ws, d0, d1 = self._test_options({
+            estimate.Processor.OPT_FORMULAS: True
+        })
+        self._test_formulas(ws, d0, d1)
+
 
     def test_options__filtering(self):
-        self._test_options({ estimate.Processor.OPT_FORMULAS: True, estimate.Processor.OPT_FILTER_VISIBILITY: True })
+        ws, d0, d1 = self._test_options({
+            estimate.Processor.OPT_FORMULAS: True,
+            estimate.Processor.OPT_FILTER_VISIBILITY: True
+        })
+        # todo: implement specific tests
 
     def test_options__mvp_full(self):
-        self._test_options({
+        ws, d0, d1 = self._test_options({
             estimate.Processor.OPT_MVP: True,
             estimate.Processor.OPT_FORMULAS: True,
             estimate.Processor.OPT_FILTER_VISIBILITY: True
         })
+        # todo: implement specific tests
 
     def test_options__mvp_no_validation(self):
-        self._test_options({
+        ws, d0, d1 = self._test_options({
             estimate.Processor.OPT_MVP: True,
             estimate.Processor.OPT_FORMULAS: True,
             estimate.Processor.OPT_FILTER_VISIBILITY: True,
             estimate.Processor.OPT_VALIDATION: False
         })
+        # todo: implement specific tests
+
+    def _test_formulas(self, ws, d0, d1):
+
+        titles = [ (r, _val(ws, 'A%s'%r).strip()) for r in xrange(d0, 1+d1) ] # obtain titles
+        titles = [ (r, t) for (r, t) in titles if not (t[0] == '(' and t[-1] == ')') ] # remove roles
+        titles = [ (r, t) for (r, t) in titles if t != '...' ] # remove temporary hierarchy elements
+
+        _assert_is_formula = lambda c, r, chk: self.assertTrue(
+            chk(ws['%s%s'%(c, r)].value),
+            '%s%s: Should start with "="' % (c, r)
+        )
+
+        for r, t in titles:
+            for c in ('E', 'F', 'G'): _assert_is_formula(c, r, chk=lambda val: (val != '') and val.startswith('='))
+            for c in ('I', 'J', 'K'): _assert_is_formula(c, r, chk=lambda val: (val == '') or val.startswith('='))

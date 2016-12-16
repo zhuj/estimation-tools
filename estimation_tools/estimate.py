@@ -383,11 +383,10 @@ class Processor:
     }
 
     @staticmethod
-    def _loadTheme(path):
-        theme = None
-        if (path is not None):
+    def _loadTheme(theme):
+        if (isinstance(theme, str)):
             import importlib
-            module = importlib.import_module(path)
+            module = importlib.import_module(theme)
             theme = module.Theme
 
         if (theme is None): theme = object() # just an empty object
@@ -638,7 +637,7 @@ class Processor:
         # ------------------------
         # prepare data validation
 
-        # validation for B (multiplier) and C (mvp)
+        # validation values for B (multiplier) and C (mvp)
         _hide_column('Z', hidden=True)     # hide Z
         _blank('Z', 0, f_multiplier)       # Z1 = empty
         _number('Z', 1, 0, f_multiplier)   # Z2 = 0
@@ -689,11 +688,13 @@ class Processor:
             # obtain estimations for the row (total, aggregated from the node and its roles)
             estimates = l.estimates()
 
-            # mvp
-            if (self._mvp):
+            # validation over mvp column
+            if (self._validation and self._mvp):
                 if (estimates is not None):
+                    # allow selection for rows with estimations
                     dv_mvp_list.ranges.append(cells('C', (row, row)))
                 else:
+                    # no mvp selection is allowed for non-estimate rows
                     dv_mvp_empty.ranges.append(cells('C', (row, row)))
 
             # ----------------------
@@ -798,6 +799,9 @@ class Processor:
                     _formula('G', l_row, template.replace('#', 'G'), f_row, f_role) # G (estimate)
 
 
+        # ----------------
+        # start the footer
+
         # footer
         row_footer = row+1
 
@@ -819,8 +823,8 @@ class Processor:
         if (self._filter_visibility):
             ws.auto_filter.add_filter_column((ord('B')-ord('A')), ["1"], blank=True) # B (visibility/multiplier)
 
-        # ------
-        # footer
+        # ---------
+        # total row
 
         def _total(row_total, caption='Total', row_mul=cells('B', row_lines)):
             # total values (it uses row_mul to avoid duuble calculations for roles)
