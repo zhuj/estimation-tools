@@ -1,6 +1,6 @@
 usage: estimate.py [-h] [--theme THEME] [--sort] [--p99] [--mvp]
                    [--no-data-validation] [--no-roles] [--formulas]
-                   [--filter-visibility] [-o OUTPUT]
+                   [--filter-visibility] [--factors FACTORS] [-o OUTPUT]
                    filename
 
 Converts freemind estimation to xlsx report.
@@ -19,4 +19,6 @@ optional arguments:
   --formulas            use formulas for estimation numbers
   --filter-visibility   don't hide multiplier/visibility column, use it as a
                         filter instead (doesn't work for LibreOffice)
+  --factors FACTORS     use extra factors with default values (in format
+                        f1:v1,f2:v2,f3:v3,...)
   -o OUTPUT             out file name

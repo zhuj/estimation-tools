@@ -933,28 +933,37 @@ class Processor:
 
             # base factor
             row_footer += 1
-            _string('A', row_footer, ' + base', f_caption)          # A (caption)
+            _string('A', row_footer, ' = base', f_caption)          # A (caption)
             _number('C', row_footer, 1.0, f_estimates)              # C (kappa)
             kappa_rows.append(row_footer)
 
-            # factors
+            # factors (from options)
             for f, v in self._factors.items():
                 row_footer += 1
                 _string('A', row_footer, ' + %s' % f, f_caption)    # A (caption)
                 _number('C', row_footer, v, f_estimates)            # C (kappa)
                 kappa_rows.append(row_footer)
 
-            # correction factor
+            # correction factor (other)
             row_footer += 1
-            _string('A', row_footer, ' + correction', f_caption)    # A (caption)
-            _number('C', row_footer, 0.5, f_estimates)              # C (kappa)
+            _string('A', row_footer, ' + other', f_caption)         # A (caption)
+            _number('C', row_footer, 0.0, f_estimates)              # C (kappa)
+            kappa_rows.append(row_footer)
+
+            # all together
+            kappa_rows = [min(kappa_rows), max(kappa_rows)]
+
+            # correction factor (total multiplier)
+            row_footer += 1
+            _string('A', row_footer, ' * correction', f_caption)    # A (caption)
+            _number('C', row_footer, 1.0, f_estimates)              # C (kappa)
             kappa_rows.append(row_footer)
 
             # kappa: correction factor (total, formula)
             row_footer += 1
             row_kappa = row_footer
             _string('A', row_kappa, 'K (total)', f_caption)         # A (caption)
-            _formula('C', row_kappa, '=SUM(%s)' % cells('C', (min(kappa_rows), max(kappa_rows))), f_estimates)  # C (kappa)
+            _formula('C', row_kappa, '=SUM(%s)*%s' % (cells('C', kappa_rows[0:2]), cell('C', kappa_rows[2])), f_estimates)  # C (kappa)
             del kappa_rows
         else:
             # kappa: correction factor
