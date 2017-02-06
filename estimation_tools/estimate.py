@@ -128,6 +128,9 @@ class Node:
             l.append(value)
             self._annotations[name] = l
 
+    def mvp_minus(self):
+        return len(self.annotation('mvp-')) > 0
+
     def estimate(self, role, numbers):
 
         # update source
@@ -229,6 +232,11 @@ class Theme:
     # default number format
     DEFAULT_F_ESTIMATES = lambda self: self._merge_format(self.F_NUMBERS, {
         'font_bold': True
+    })
+
+    # default number format
+    DEFAULT_F_PERCENTAGE = lambda self: self._merge_format(self.F_NUMBERS, {
+        'num_format': '0%'
     })
 
     # comment row
@@ -368,18 +376,25 @@ class Processor:
     OPT_VALIDATION = 'validation'
     OPT_FORMULAS = 'formulas'
     OPT_FILTER_VISIBILITY = 'filter_visibility'
+    OPT_FACTORS = 'factors'
 
     # regexps patterns
     import re
     RE_ESTIMATE = re.compile("estimate\\s*=(\\s*\\d+\\s*)[/](\\s*\\d+\\s*)[/](\\s*\\d+\\s*)")
-    RE_ANNOTATION = re.compile("^[[](\\w+)[]]\\s*(.*)")
+    RE_ANNOTATION = re.compile("^[[]([a-z0-9-]+)[]]\\s*(.*)")
 
     # annotation types
     ANNOTATIONS = {
         'warn': ('comment', '(!) '),
         'idea': ('comment', ''),
         'todo': ('comment', ''),
-        'impl': ('comment', '')
+        'impl': ('comment', ''),
+
+        'mvp-': ('mvp-', '*'),
+        'api+': ('api+', '*'),
+        'stage': ('phase', ''),
+        'phase': ('phase', ''),
+        'module': ('module', '')
     }
 
     @staticmethod
@@ -405,6 +420,16 @@ class Processor:
         return options
 
     #
+    @staticmethod
+    def _parse_factors(factors):
+        if (factors):
+            factors = factors.split(',')
+            factors = [ x.split(':') for x in factors ]
+            factors = { x.strip():float(y.strip()) for x, y in factors }
+            return factors
+        return None
+
+    #
     def __init__(self, options):
         options = Processor._wrap_options(options)
         self._theme = Processor._loadTheme(getattr(options, Processor.OPT_THEME, None))
@@ -415,6 +440,7 @@ class Processor:
         self._roles = getattr(options, Processor.OPT_ROLES, False) and True
         self._formulas = self._roles and (getattr(options, Processor.OPT_FORMULAS, False) and True)
         self._filter_visibility = self._roles and (getattr(options, Processor.OPT_FILTER_VISIBILITY, False) and True)
+        self._factors = Processor._parse_factors(getattr(options, Processor.OPT_FACTORS, None))
 
     @staticmethod
     def _text(xmlNode):
@@ -590,6 +616,7 @@ class Processor:
         f_caption = self._theme.F_CAPTION
         f_comment = self._theme.F_COMMENT
         f_estimates = self._theme.F_ESTIMATES
+        f_percentage = self._theme.F_PERCENTAGE
         f_role = self._theme.F_ROLE_ROW
         f_total = self._theme.F_TOTAL
         f_final = self._theme.F_FINAL
@@ -601,7 +628,7 @@ class Processor:
         # setup columns
         _column('A', width=40, f=self._theme.F_DEFAULT)
         _column('B', width=3,  f=self._theme.F_MULTIPLIER)
-        _column('C', width=6,  f=self._theme.F_DEFAULT)
+        _column('C', width=7,  f=self._theme.F_DEFAULT)
         _column('D', width=50, f=self._theme.F_COMMENT)
         _column('E', width=7,  f=self._theme.F_NUMBERS)
         _column('F', width=7,  f=self._theme.F_NUMBERS)
@@ -738,6 +765,7 @@ class Processor:
             # true means it's a raw data for formulas - we have to use it
             multiplier = (not role) and (estimates is not None)
             mvp = multiplier and self._mvp and True
+            mvp = mvp and (not l.mvp_minus())
 
             # let's fill the row with data
             _string('A', row, l.title_with_level(), f_row)                            # A (title)
@@ -872,6 +900,8 @@ class Processor:
                 _formula('E', row_footer, '=SUMPRODUCT(%s,%s)' % (cells('E', row_lines), role_mul), f_total, f_estimates) # E (sum)
                 _formula('F', row_footer, '=SUMPRODUCT(%s,%s)' % (cells('F', row_lines), role_mul), f_total, f_estimates) # F (sum)
                 _formula('G', row_footer, '=SUMPRODUCT(%s,%s)' % (cells('G', row_lines), role_mul), f_total, f_estimates) # G (sum)
+                _formula('I', row_footer, '=(%s+4*%s+%s)/6' % (cell('E', row_footer), cell('F', row_footer), cell('G', row_footer)), f_total, f_estimates) # I (total)
+                _formula('J', row_footer, '=(%s/%s)' % (cell('I', row_footer), cell('I', row_total)), f_percentage) # K (%)
 
         if (self._mvp):
             # one extra line
@@ -894,11 +924,44 @@ class Processor:
         _string('A', row_sigma, 'Standard deviation', f_caption)                     # A (caption)
         _formula('C', row_sigma, '=SQRT(%s)' % (cell('K', row_total)), f_estimates)  # C (sigma)
 
-        # kappa: correction factor
-        row_footer += 1
-        row_kappa = row_footer
-        _string('A', row_kappa, 'K', f_caption)    # A (caption)
-        _number('C', row_kappa, 1.5, f_estimates)  # C (kappa)
+        # factors
+        if (self._factors):
+            row_footer += 1
+            _string('A', row_footer, 'K:', f_caption)               # A (caption)
+
+            kappa_rows = []
+
+            # base factor
+            row_footer += 1
+            _string('A', row_footer, ' + base', f_caption)          # A (caption)
+            _number('C', row_footer, 1.0, f_estimates)              # C (kappa)
+            kappa_rows.append(row_footer)
+
+            # factors
+            for f, v in self._factors.items():
+                row_footer += 1
+                _string('A', row_footer, ' + %s' % f, f_caption)    # A (caption)
+                _number('C', row_footer, v, f_estimates)            # C (kappa)
+                kappa_rows.append(row_footer)
+
+            # correction factor
+            row_footer += 1
+            _string('A', row_footer, ' + correction', f_caption)    # A (caption)
+            _number('C', row_footer, 0.5, f_estimates)              # C (kappa)
+            kappa_rows.append(row_footer)
+
+            # kappa: correction factor (total, formula)
+            row_footer += 1
+            row_kappa = row_footer
+            _string('A', row_kappa, 'K (total)', f_caption)         # A (caption)
+            _formula('C', row_kappa, '=SUM(%s)' % cells('C', (min(kappa_rows), max(kappa_rows))), f_estimates)  # C (kappa)
+            del kappa_rows
+        else:
+            # kappa: correction factor
+            row_footer += 1
+            row_kappa = row_footer
+            _string('A', row_kappa, 'K', f_caption)    # A (caption)
+            _number('C', row_kappa, 1.5, f_estimates)  # C (kappa)
 
         if (self._p99):
             # P=99%, super precision
@@ -1001,6 +1064,13 @@ if __name__ == "__main__":
         action='store_true',
         dest=Processor.OPT_FILTER_VISIBILITY,
         help='''don't hide multiplier/visibility column, use it as a filter instead (doesn't work for LibreOffice)'''
+    )
+
+    parser.add_argument(
+        '--factors',
+        action='store',
+        dest=Processor.OPT_FACTORS,
+        help='''use extra factors with default values (in format f1:v1,f2:v2,f3:v3,...) '''
     )
 
     parser.add_argument(
