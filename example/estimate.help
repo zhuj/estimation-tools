@@ -1,6 +1,7 @@
 usage: estimate.py [-h] [--theme THEME] [--sort] [--p99] [--mvp]
                    [--no-data-validation] [--no-roles] [--formulas]
-                   [--filter-visibility] [--factors FACTORS] [-o OUTPUT]
+                   [--filter-visibility] [--arrows] [--stages]
+                   [--factors FACTORS] [-o OUTPUT]
                    filename
 
 Converts freemind estimation to xlsx report.
@@ -15,10 +16,14 @@ optional arguments:
   --p99                 use P=99% instead of P=95%
   --mvp                 add Minimum Viable Product (MVP) features
   --no-data-validation  don't apply data validation for filter and MVP column
+                        (SharePoint fix)
   --no-roles            don't provide estimation details for each role
   --formulas            use formulas for estimation numbers
   --filter-visibility   don't hide multiplier/visibility column, use it as a
                         filter instead (doesn't work for LibreOffice)
+  --arrows              transformation: handle arrows as dependency indicators
+  --stages              transformation: use stages markers as nodes/subtree
+                        groups (replaces MVP feature)
   --factors FACTORS     use extra factors with default values (in format
                         f1:v1,f2:v2,f3:v3,...)
   -o OUTPUT             out file name
