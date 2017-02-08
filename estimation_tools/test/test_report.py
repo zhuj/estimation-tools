@@ -21,15 +21,15 @@ class ReportTestCase(unittest.TestCase):
         self.assertEqual( (ws.min_column, ws.min_row), (1, 1) )
         self.assertEqual( _val(ws, 'A1'), 'Task / Subtask' )
         self.assertEqual( _val(ws, 'B1'), 'Filter' )
-        if ( _val(ws, 'C1') != 'MVP' ): self.assertEqual( _val(ws, 'C1'), '' )
-        self.assertEqual( _val(ws, 'D1'), 'Comment' )
-        self.assertEqual( _val(ws, 'E1'), 'Min' )
-        self.assertEqual( _val(ws, 'F1'), 'Real' )
-        self.assertEqual( _val(ws, 'G1'), 'Max' )
-        self.assertEqual( _val(ws, 'H1'), '' )
-        self.assertEqual( _val(ws, 'I1'), 'Avg' )
-        self.assertEqual( _val(ws, 'J1'), 'SD' )
-        self.assertEqual( _val(ws, 'K1'), 'Sq' )
+        if ( _val(ws, 'C1') != 'MVP' and _val(ws, 'C1') != 'Stage' ): self.assertEqual( _val(ws, 'C1'), '' )
+        self.assertEqual( _val(ws, 'H1'), 'Comment' )
+        self.assertEqual( _val(ws, 'I1'), 'Min' )
+        self.assertEqual( _val(ws, 'J1'), 'Real' )
+        self.assertEqual( _val(ws, 'K1'), 'Max' )
+        self.assertEqual( _val(ws, 'L1'), '' )
+        self.assertEqual( _val(ws, 'M1'), 'Avg' )
+        self.assertEqual( _val(ws, 'N1'), 'SD' )
+        self.assertEqual( _val(ws, 'O1'), 'Sq' )
         return 2
 
     def _check_footer(self, ws):
@@ -45,6 +45,12 @@ class ReportTestCase(unittest.TestCase):
         self.assertTrue( _val(ws, 'A%s' % row).startswith('Min') )
         row -= 1
 
+        # empty
+        while True:
+            self.assertTrue( row > 1 )
+            if ( _val(ws, 'A%s' % row) != '' ): break
+            row -= 1
+
         # kappa
         self.assertTrue( row > 1 )
         self.assertTrue( _val(ws, 'A%s' % row).startswith('K') )
@@ -56,9 +62,10 @@ class ReportTestCase(unittest.TestCase):
         row -= 1
 
         # empty
-        self.assertTrue( row > 1 )
-        self.assertTrue( _val(ws, 'A%s' % row) == '' )
-        row -= 1
+        while True:
+            self.assertTrue( row > 1 )
+            if ( _val(ws, 'A%s' % row) != '' ): break
+            row -= 1
 
         # total (mvp), optional
         self.assertTrue( row > 1 )
@@ -82,9 +89,10 @@ class ReportTestCase(unittest.TestCase):
         row -= 1
 
         # empty
-        self.assertTrue( row > 1 )
-        self.assertTrue( _val(ws, 'A%s' % row) == '' )
-        row -= 1
+        while True:
+            self.assertTrue( row > 1 )
+            if ( _val(ws, 'A%s' % row) != '' ): break
+            row -= 1
 
         # return it
         return row
@@ -333,5 +341,5 @@ class ReportTestCase(unittest.TestCase):
         )
 
         for r, t in titles:
-            for c in ('E', 'F', 'G'): _assert_is_formula(c, r, chk=lambda val: (val != '') and val.startswith('='))
-            for c in ('I', 'J', 'K'): _assert_is_formula(c, r, chk=lambda val: (val == '') or val.startswith('='))
+            for c in ('I', 'K', 'K'): _assert_is_formula(c, r, chk=lambda val: (val != '') and val.startswith('='))
+            for c in ('N', 'M', 'O'): _assert_is_formula(c, r, chk=lambda val: (val == '') or val.startswith('='))

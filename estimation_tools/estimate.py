@@ -463,7 +463,7 @@ class Processor:
     #
     def __init__(self, options):
         options = Processor._wrap_options(options)
-        self._factor = float(getattr(options, Processor.OPT_FACTOR, "1.0"))
+        self._factor = float(getattr(options, Processor.OPT_FACTOR, None) or "1.0")
         self._theme = Processor._loadTheme(getattr(options, Processor.OPT_THEME, None))
         self._sorting = getattr(options, Processor.OPT_SORTING, False) and True
         self._validation = getattr(options, Processor.OPT_VALIDATION, False) and True
@@ -555,14 +555,14 @@ class Processor:
         """ it extracts stages (from annotations) and rearrange nodes according their stages """
 
         _node_cache = {}
-        def _add_node(path, caption=lambda x:x):
+        def _add_node(path, caption=lambda x:x[-1]):
             if (not path): return tree
 
             v = _node_cache.get(path, None)
             if (v is not None): return v
 
             r = _add_node(path[:-1], caption)
-            e = r.append( Node(r, caption(path[-1])) )
+            e = r.append( Node(r, caption(path)) )
             _node_cache[path] = e
             return e
 
@@ -575,7 +575,7 @@ class Processor:
         stages = list(set([ sl for (l, sl) in lines ]))
         stages.sort()
         for sl in stages:
-            s = _add_node(sl, caption=lambda x:'Stage %s' % x)
+            s = _add_node(sl, caption=lambda x:'Stage %s' % '.'.join(x))
             s._stage = sl
         del stages
 
@@ -1193,7 +1193,7 @@ class Processor:
             # kappa: correction factor
             row_footer += 1
             row_kappa = row_footer
-            _string(B0, row_kappa, E6, f_caption)     # B0 (caption)
+            _string(B0, row_kappa, 'K', f_caption)     # B0 (caption)
             _number(B2, row_kappa, 1.5, f_estimates)  # B2 (kappa)
 
         if (self._p99):
