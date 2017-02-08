@@ -170,6 +170,13 @@ class Node:
 
         return reduce(lambda x,y: x+y, estimations)
 
+    def trace(self, stoppers):
+        if (self in stoppers): return [ ]
+        if (self._parent is None): return [ self ]
+        trace = self._parent.trace(stoppers)
+        trace.append(self)
+        return trace
+
     def acquire(self, name):
         v = getattr(self, name, None)
         if (v is not None): return v
@@ -389,6 +396,7 @@ class Processor:
     import openpyxl as pyxl
 
     # options
+    OPT_FACTOR = 'factor'
     OPT_THEME = 'theme'
     OPT_SORTING = 'sorting'
     OPT_P_99 = 'p99'
@@ -455,6 +463,7 @@ class Processor:
     #
     def __init__(self, options):
         options = Processor._wrap_options(options)
+        self._factor = float(getattr(options, Processor.OPT_FACTOR, "1.0"))
         self._theme = Processor._loadTheme(getattr(options, Processor.OPT_THEME, None))
         self._sorting = getattr(options, Processor.OPT_SORTING, False) and True
         self._validation = getattr(options, Processor.OPT_VALIDATION, False) and True
@@ -497,7 +506,7 @@ class Processor:
             # first look at the estimation pattern
             match = Processor.RE_ESTIMATE.match(title)
             if (match):
-                estimates = [ float(match.group(x).strip()) for x in (1,2,3) ]
+                estimates = [ self._factor * float(match.group(x).strip()) for x in (1,2,3) ]
                 if (parent.is_role()):
                     role = parent.title()
                     parent.parent().estimate(role, estimates)
@@ -543,30 +552,30 @@ class Processor:
 
     #
     def transform_stages(self, tree):
-        import copy
+        """ it extracts stages (from annotations) and rearrange nodes according their stages """
 
         _node_cache = {}
-        def _add_node(path, prefix='%s'):
+        def _add_node(path, caption=lambda x:x):
             if (not path): return tree
 
             v = _node_cache.get(path, None)
             if (v is not None): return v
 
-            r = _add_node(path[:-1], prefix)
-            e = r.append(Node(r, prefix % path[-1]))
+            r = _add_node(path[:-1], caption)
+            e = r.append( Node(r, caption(path[-1])) )
             _node_cache[path] = e
             return e
 
         lines = Processor._collect(root)
         lines = [ ( l, s.strip() ) for l in lines for s in l.annotation('stage') ]
-        lines = [ ( l, tuple([int(s.strip()) for s in sl.split('.')]) ) for (l, sl) in lines if (s and not l.is_role()) ]
-        #lines.reverse() # not it's backward hierarchy sorted
+        lines = [ ( l, tuple([s.strip().lower().capitalize() for s in sl.split('.')]) ) for (l, sl) in lines if (s and not l.is_role()) ]
+        # XXX: think about: lines.reverse() # not it's backward hierarchy sorted
 
         # append stages in right order
         stages = list(set([ sl for (l, sl) in lines ]))
         stages.sort()
         for sl in stages:
-            s = _add_node(sl, 'Stage %s')
+            s = _add_node(sl, caption=lambda x:'Stage %s' % x)
             s._stage = sl
         del stages
 
@@ -574,17 +583,11 @@ class Processor:
         stoppers = [tree] + _node_cache.values()
 
         # process nodes
+        import copy
         for l, sl in lines:
             s = _node_cache.get(sl)
+            trace = l.trace(stoppers)[:-1]
 
-            trace = []
-            p = l
-            while ((p is not None) and (p not in stoppers)):
-                trace.append(p)
-                p = p.parent()
-
-            trace.reverse()
-            trace = trace[:-1]
             for t in trace:
                 sl = sl + (t.title(), )
                 s = _add_node(sl)
@@ -609,6 +612,7 @@ class Processor:
 
     #
     def transform(self, tree):
+        """ it applies transformations to the tree just before its reporting """
         if (self._stages): tree = self.transform_stages(tree)
         return tree
 
@@ -756,6 +760,8 @@ class Processor:
         E5 = _cells.next()  # N: estimate-st
         E6 = _cells.next()  # O: estimate-sq
 
+        R0 = _cells.next()  # P: role name
+
         del _cells
 
         # ------------
@@ -777,6 +783,7 @@ class Processor:
         _column(E4, width=8,  f=self._theme.F_NUMBERS)
         _column(E5, width=8,  f=self._theme.F_NUMBERS)
         _column(E6, width=8,  f=self._theme.F_NUMBERS)
+        _column(R0, width=3,  f=self._theme.F_DEFAULT)
 
         # hide visibility if required
         if (not self._filter_visibility):
@@ -787,6 +794,9 @@ class Processor:
         _hide_column(S1, hidden=True)
         _hide_column(S2, hidden=True)
         _hide_column(S3, hidden=True)
+
+        # hide role column
+        _hide_column(R0, hidden=True)
 
         # start rows
         row = 0
@@ -808,6 +818,7 @@ class Processor:
         _string(E4, row, 'Avg', f_header)             # E4: weighted mean
         _string(E5, row, 'SD', f_header)              # E5: standard deviation
         _string(E6, row, 'Sq', f_header)              # E6: squared deviation
+        _string(R0, row, 'Role', f_header)            # R0: role name
 
         if (self._mvp):
             _string(B2, row, 'MVP', f_header)         # B2: MVP
@@ -865,8 +876,8 @@ class Processor:
         # start the transformation
 
         # lines
-        stages_rows = {}
-        roles_rows = {}
+        stages = set()
+        roles = set()
         row_lines = {}
         for l in lines:
 
@@ -895,27 +906,25 @@ class Processor:
             if (role):
 
                 # collect roles rows, if roles are required
-                role_rows = roles_rows.get(l.title(), None)
-                if role_rows is None:
-                    roles_rows[l.title()] = role_rows = []
-                role_rows.append(row)
+                roles.add(l.title())
 
                 # set row options (hide it)
                 _hide_row(row, hidden=True)
 
                 # fill with values
-                _string(B0, row, l.title_with_level(), f_role)  # B0 (title)
-                _number(B1, row, 0, f_role, f_multiplier)       # B1 (visibility/multiplier)
-                _blank(B2, row, f_role)                         # B2 (empty/MVP/Stage)
-                _string(S0, row, '', f_role)                    # S0 (module, submodule, ...)
-                _string(S1, row, '', f_role)                    # S1 (comment)
-                _string(S2, row, '', f_role)                    # S2 (comment)
-                _string(S3, row, '', f_role)                    # S3 (comment)
-                _string(C0, row, '', f_role)                    # C0 (comment)
+                _string(B0, row, l.title_with_level(), f_role)          # B0 (title)
+                _number(B1, row, 0, f_role, f_multiplier)               # B1 (visibility/multiplier)
+                _blank(B2, row, f_role)                                 # B2 (empty/MVP/Stage)
+                _formula(R0, row, '=TRIM(%s)' % cell(B0, row), f_row)   # R0 (role)
+                _string(S0, row, '', f_role)                            # S0 (module, submodule, ...)
+                _string(S1, row, '', f_role)                            # S1 (comment)
+                _string(S2, row, '', f_role)                            # S2 (comment)
+                _string(S3, row, '', f_role)                            # S3 (comment)
+                _string(C0, row, '', f_role)                            # C0 (comment)
                 if (estimates is not None):
-                    _number(E0, row, estimates[0], f_role)      # E0 (estimate)
-                    _number(E1, row, estimates[1], f_role)      # E1 (estimate)
-                    _number(E2, row, estimates[2], f_role)      # E2 (estimate)
+                    _number(E0, row, estimates[0], f_role)              # E0 (estimate)
+                    _number(E1, row, estimates[1], f_role)              # E1 (estimate)
+                    _number(E2, row, estimates[2], f_role)              # E2 (estimate)
 
                 continue
 
@@ -931,14 +940,16 @@ class Processor:
             # and store them to current line
             l._f_row = f_row
 
-            # multiplier will be used in SUMPRODUCT formulas:
-            # true means it's a raw data for formulas - we have to use it
+            # multiplier will be used in SUMIFS formulas:
+            # '1' means that it's a data for formulas - we have to use it,
+            # '' means that it's a role (don't use it in total numbers - use aggregated estimations)
             multiplier = (not role) and (estimates is not None)
 
             # let's fill the row with data
             _string(B0, row, l.title_with_level(), f_row)                            # B0 (title)
             _blank(B1, row, f_row, f_multiplier)                                     # B1 (visibility/multiplier)
             _blank(B2, row, f_row)                                                   # B2 (empty/MVP/Stage)
+            _blank(R0, row, f_row)                                                   # R0 (role)
             _string(S0, row, '', f_row)                                              # S0 (module, submodule, ...)
             _string(S1, row, '', f_row)                                              # S1 (comment)
             _string(S2, row, '', f_row)                                              # S2 (comment)
@@ -956,19 +967,23 @@ class Processor:
             if (multiplier):
                 _number(B1, row, 1, f_row, f_multiplier) # B1 (visibility/multiplier)
 
-            if (estimates is not None):
-                if (self._mvp):
+            # setup MVP/Stage for non-role rows
+            if (self._mvp):
+                if (estimates is not None):
                     mvp = multiplier and self._mvp and True
                     mvp = mvp and (not l.mvp_minus()) and True
-                    _boolean(B2, row, mvp, f_row) # B2 (MVP)
-                elif (self._stages):
-                    stage = _stage_to_string(l)
-                    _string(B2, row, stage, f_row) # B2 (Stage)
-                    stage_rows = stages_rows.get(stage, None)
-                    if stage_rows is None:
-                        stages_rows[stage] = stage_rows = []
-                    stage_rows.append(row)
+                    _boolean(B2, row, mvp, f_row) # B2 (MVP, estimate rows only)
+            elif (self._stages):
+                stage = _stage_to_string(l)
+                if (not stage): stage = "(?)"
+                stages.add(stage)
+                if (estimates is not None):
+                    _string(B2, row, stage, f_row) # B2 (Stage, all rows)
+                else:
+                    _string(B2, row, stage, f_role) # B2 (Stage, all rows)
 
+            # fill estimates
+            if (estimates is not None):
                 _number(E0, row, estimates[0], f_row, f_estimates)               # E0 (estimate)
                 _number(E1, row, estimates[1], f_row, f_estimates)               # E1 (estimate)
                 _number(E2, row, estimates[2], f_row, f_estimates)               # E2 (estimate)
@@ -1035,7 +1050,7 @@ class Processor:
         # ---------
         # total row
 
-        def _total(row_total, caption='Total', row_mul=cells(B1, row_lines)):
+        def _total(row_total, caption='Total', row_criteria='%s,"=1"' % (cells(B1, row_lines))):
             # total values (it uses row_mul to avoid duuble calculations for roles)
             _string(B0, row_total, caption, f_total)                                                                 # B0 (caption)
             _string(B1, row_total, '', f_total)                                                                      # B1 (hidden)
@@ -1045,16 +1060,16 @@ class Processor:
             _string(S2, row_total, '', f_total)                                                                      # S2
             _string(S3, row_total, '', f_total)                                                                      # S3
             _string(C0, row_total, '', f_total)                                                                      # C0
-            _formula(E0, row_total, '=SUMPRODUCT(%s,%s)' % (cells(E0, row_lines), row_mul), f_total, f_estimates)    # E0 (sum)
-            _formula(E1, row_total, '=SUMPRODUCT(%s,%s)' % (cells(E1, row_lines), row_mul), f_total, f_estimates)    # E1 (sum)
-            _formula(E2, row_total, '=SUMPRODUCT(%s,%s)' % (cells(E2, row_lines), row_mul), f_total, f_estimates)    # E2 (sum)
+            _formula(E0, row_total, '=SUMIFS(%s,%s)' % (cells(E0, row_lines), row_criteria), f_total, f_estimates)   # E0 (sum)
+            _formula(E1, row_total, '=SUMIFS(%s,%s)' % (cells(E1, row_lines), row_criteria), f_total, f_estimates)   # E1 (sum)
+            _formula(E2, row_total, '=SUMIFS(%s,%s)' % (cells(E2, row_lines), row_criteria), f_total, f_estimates)   # E2 (sum)
             _string(E3, row_total, '', f_total)                                                                      # E3
-            _formula(E4, row_total, '=SUMPRODUCT(%s,%s)' % (cells(E4, row_lines), row_mul), f_total, f_estimates)    # E4 (sum)
-            _formula(E5, row_total, '=SUMPRODUCT(%s,%s)' % (cells(E5, row_lines), row_mul), f_total, f_estimates)    # E5 (sum)
-            _formula(E6, row_total, '=SUMPRODUCT(%s,%s)' % (cells(E6, row_lines), row_mul), f_total, f_estimates)    # E6 (sum)
+            _formula(E4, row_total, '=SUMIFS(%s,%s)' % (cells(E4, row_lines), row_criteria), f_total, f_estimates)   # E4 (sum)
+            _formula(E5, row_total, '=SUMIFS(%s,%s)' % (cells(E5, row_lines), row_criteria), f_total, f_estimates)   # E5 (sum)
+            _formula(E6, row_total, '=SUMIFS(%s,%s)' % (cells(E6, row_lines), row_criteria), f_total, f_estimates)   # E6 (sum)
             return row_total
 
-        def _partial(row_total, row_footer, caption, row_mul):
+        def _partial(row_total, row_footer, caption, row_criteria='%s,"=1"' % (cells(B1, row_lines))):
             # partial total row
             _string(B0, row_footer, caption, f_total)                                                                # B0 (caption)
             _string(B1, row_footer, '', f_total)                                                                     # B1 (hidden)
@@ -1064,9 +1079,9 @@ class Processor:
             _string(S2, row_footer, '', f_total)                                                                     # S2
             _string(S3, row_footer, '', f_total)                                                                     # S3
             _string(C0, row_footer, '', f_total)                                                                     # C0
-            _formula(E0, row_footer, '=SUMPRODUCT(%s,%s)' % (cells(E0, row_lines), row_mul), f_total, f_estimates)   # E0 (sum)
-            _formula(E1, row_footer, '=SUMPRODUCT(%s,%s)' % (cells(E1, row_lines), row_mul), f_total, f_estimates)   # E1 (sum)
-            _formula(E2, row_footer, '=SUMPRODUCT(%s,%s)' % (cells(E2, row_lines), row_mul), f_total, f_estimates)   # E2 (sum)
+            _formula(E0, row_footer, '=SUMIFS(%s,%s)' % (cells(E0, row_lines), row_criteria), f_total, f_estimates)  # E0 (sum)
+            _formula(E1, row_footer, '=SUMIFS(%s,%s)' % (cells(E1, row_lines), row_criteria), f_total, f_estimates)  # E1 (sum)
+            _formula(E2, row_footer, '=SUMIFS(%s,%s)' % (cells(E2, row_lines), row_criteria), f_total, f_estimates)  # E2 (sum)
             _formula(E4, row_footer, '=(%s+4*%s+%s)/6' % (cell(E0, row_footer), cell(E1, row_footer), cell(E2, row_footer)), f_total, f_estimates) # E4 (total)
             _formula(E5, row_footer, '=(%s/%s)' % (cell(E4, row_footer), cell(E4, row_total)), f_percentage)         # E5 (%)
             return row_footer
@@ -1079,28 +1094,17 @@ class Processor:
 
         # total values for each role, if it's required
         if (self._roles):
-            role_num = 0
-            role_rows = roles_rows.items()
-            role_rows.sort()
-            for role, role_rows in role_rows:
+            roles = list(roles)
+            roles.sort()
+            for role in roles:
                 row_footer += 1
-                role_num += 1
-                role_column = 'A' + chr(ord('A') + (role_num-1)) # new column for each role, started from 'AA'
-
-                _column(role_column, width=10, f=self._theme.F_DEFAULT)
-                _hide_column(role_column, hidden=True)
-
-                _string(role_column, 0, role, f_header)
-                for role_row in role_rows:
-                    _number(role_column, role_row, 1)
-
-                role_mul = cells(role_column, row_lines)
                 row_footer = _partial(
                     row_total=row_total,
                     row_footer=row_footer,
                     caption='  - %s' % role.strip('()'),
-                    row_mul=role_mul
+                    row_criteria='''%s,"=0",%s,"%s"''' % (cells(B1, row_lines), cells(R0, row_lines), role)
                 )
+            del roles
 
         if (self._mvp):
             # one extra line
@@ -1111,36 +1115,26 @@ class Processor:
             row_total = row_footer = _total(
                 row_total=row_footer + 1,
                 caption='Total (MVP)',
-                row_mul="%s,%s" % (cells(B1, row_lines), cells(B2, row_lines))
+                row_criteria='%s,"=1",%s,"=1"' % (cells(B1, row_lines), cells(B2, row_lines))
             )
 
         elif (self._stages):
+
             # one extra line
             row_footer += 1
 
             # total (stage) values
-            stage_num = 0
-            stage_rows = stages_rows.items()
-            stage_rows.sort()
-            for stage, stage_rows in stage_rows:
+            stages = list(stages)
+            stages.sort()
+            for stage in stages:
                 row_footer += 1
-                stage_num += 1
-                stage_column = 'B' + chr(ord('A') + (stage_num-1)) # new column for each stage, started from 'BA'
-
-                _column(stage_column, width=10, f=self._theme.F_DEFAULT)
-                _hide_column(stage_column, hidden=True)
-
-                _string(stage_column, 0, stage, f_header)
-                for stage_row in stage_rows:
-                    _number(stage_column, stage_row, 1)
-
-                stage_mul = cells(stage_column, row_lines)
                 row_footer = _partial(
                     row_total=row_total,
                     row_footer=row_footer,
                     caption=' - Stage %s' % stage,
-                    row_mul=stage_mul
+                    row_criteria='%s,"=1",%s,"=%s"' % (cells(B1, row_lines), cells(B2, row_lines), stage)
                 )
+            del stages
 
             # filter (TODO)
             # ws.auto_filter.add_filter_column((ord(B2)-ord('A')), ["1"], blank=True)
@@ -1157,14 +1151,14 @@ class Processor:
         # factors
         if (self._factors):
             row_footer += 1
-            _string(B0, row_footer, 'K:', f_caption)               # B0 (caption)
+            _string(B0, row_footer, 'K:', f_caption)                   # B0 (caption)
 
             kappa_rows = []
 
             # base factor
             row_footer += 1
-            _string(B0, row_footer, ' = base', f_caption)          # B0 (caption)
-            _number(B2, row_footer, 1.0, f_estimates)              # B2 (kappa)
+            _string(B0, row_footer, ' = base', f_caption)              # B0 (caption)
+            _number(B2, row_footer, 1.0, f_estimates)                  # B2 (kappa)
             kappa_rows.append(row_footer)
 
             # factors (from options)
@@ -1185,14 +1179,14 @@ class Processor:
 
             # correction factor (total multiplier)
             row_footer += 1
-            _string(B0, row_footer, ' * correction', f_caption)    # B0 (caption)
-            _number(B2, row_footer, 1.0, f_estimates)              # B2 (kappa)
+            _string(B0, row_footer, ' * correction', f_caption)        # B0 (caption)
+            _number(B2, row_footer, 1.0, f_estimates)                  # B2 (kappa)
             kappa_rows.append(row_footer)
 
             # kappa: correction factor (total, formula)
             row_footer += 1
             row_kappa = row_footer
-            _string(B0, row_kappa, 'K (total)', f_caption)         # B0 (caption)
+            _string(B0, row_kappa, 'K (total)', f_caption)             # B0 (caption)
             _formula(B2, row_kappa, '=SUM(%s)*%s' % (cells(B2, kappa_rows[0:2]), cell(B2, kappa_rows[2])), f_estimates)  # B2 (kappa)
             del kappa_rows
         else:
@@ -1257,6 +1251,13 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(
         description='''Converts freemind estimation to xlsx report.'''
+    )
+
+    parser.add_argument(
+        '--factor',
+        action='store',
+        dest=Processor.OPT_FACTOR,
+        help='''use a given factor for estimates (default = 1.0)'''
     )
 
     parser.add_argument(
