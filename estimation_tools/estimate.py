@@ -177,10 +177,20 @@ class Node:
         trace.append(self)
         return trace
 
-    def acquire(self, name):
-        v = getattr(self, name, None)
+    def fill_from(self, node):
+        import copy
+        self._annotations = copy.copy(node._annotations)
+        #for k,v in vars(node).items():
+        #    if (k.startswith('_custom_')):
+        #        setattr(self, k, copy.copy(v))
+
+    def set_custom(self, name, value):
+        setattr(self, '_custom_' + name, value)
+
+    def acquire_custom(self, name):
+        v = getattr(self, '_custom_' + name, None)
         if (v is not None): return v
-        if (self._parent is not None): return self._parent.acquire(name)
+        if (self._parent is not None): return self._parent.acquire_custom(name)
         return None
 
 # color management (just to create color series)
@@ -397,6 +407,7 @@ class Processor:
 
     # options
     OPT_FACTOR = 'factor'
+    OPT_ROLE_FACTORS = 'role_factors'
     OPT_THEME = 'theme'
     OPT_SORTING = 'sorting'
     OPT_P_99 = 'p99'
@@ -405,9 +416,11 @@ class Processor:
     OPT_VALIDATION = 'validation'
     OPT_FORMULAS = 'formulas'
     OPT_FILTER_VISIBILITY = 'filter_visibility'
-    OPT_FACTORS = 'factors'
     OPT_ARROWS = 'arrows'
     OPT_STAGES = 'stages'
+    OPT_MODULES = 'modules'
+    OPT_CORRECTIONS = 'corrections'
+    OPT_UNPIVOT_TREE = 'unpivot_tree'
 
     # regexps patterns
     import re
@@ -464,6 +477,7 @@ class Processor:
     def __init__(self, options):
         options = Processor._wrap_options(options)
         self._factor = float(getattr(options, Processor.OPT_FACTOR, None) or "1.0")
+        self._role_factors = Processor._parse_factors(getattr(options, Processor.OPT_ROLE_FACTORS, None))
         self._theme = Processor._loadTheme(getattr(options, Processor.OPT_THEME, None))
         self._sorting = getattr(options, Processor.OPT_SORTING, False) and True
         self._validation = getattr(options, Processor.OPT_VALIDATION, False) and True
@@ -472,11 +486,19 @@ class Processor:
         self._roles = getattr(options, Processor.OPT_ROLES, False) and True
         self._formulas = self._roles and (getattr(options, Processor.OPT_FORMULAS, False) and True)
         self._filter_visibility = self._roles and (getattr(options, Processor.OPT_FILTER_VISIBILITY, False) and True)
-        self._factors = Processor._parse_factors(getattr(options, Processor.OPT_FACTORS, None))
         self._stages = getattr(options, Processor.OPT_STAGES, False) and True
+        self._modules = getattr(options, Processor.OPT_MODULES, False) and True
         self._arrows = getattr(options, Processor.OPT_ARROWS, False) and True
+        self._corrections = Processor._parse_factors(getattr(options, Processor.OPT_CORRECTIONS, None))
+        self._unpivot_tree = getattr(options, Processor.OPT_UNPIVOT_TREE, False) and True
 
-        if (self._stages): self._mvp = False
+        if (self._stages):
+            self._mvp = False
+
+        if (self._unpivot_tree):
+            self._roles = False
+            self._formulas = False
+            self._filter_visibility = False
 
     @staticmethod
     def _text(xmlNode):
@@ -507,8 +529,17 @@ class Processor:
             match = Processor.RE_ESTIMATE.match(title)
             if (match):
                 estimates = [ self._factor * float(match.group(x).strip()) for x in (1,2,3) ]
+
                 if (parent.is_role()):
                     role = parent.title()
+
+                    # extra role modification
+                    if (self._role_factors is not None):
+                        f = role.strip("()").replace(':','_').lower()
+                        f = self._role_factors.get(f, 1.0)
+                        estimates = [ e*f for e in estimates ]
+
+                    # store the result into the main node (total estimation node)
                     parent.parent().estimate(role, estimates)
 
                 parent.estimate(None, estimates) # (always) set the estimation for node itself
@@ -576,14 +607,13 @@ class Processor:
         stages.sort()
         for sl in stages:
             s = _add_node(sl, caption=lambda x:'Stage %s' % '.'.join(x))
-            s._stage = sl
+            s.set_custom("stage", sl)
         del stages
 
         # full list of stoppers
         stoppers = [tree] + _node_cache.values()
 
         # process nodes
-        import copy
         for l, sl in lines:
             s = _node_cache.get(sl)
             trace = l.trace(stoppers)[:-1]
@@ -591,7 +621,8 @@ class Processor:
             for t in trace:
                 sl = sl + (t.title(), )
                 s = _add_node(sl)
-                s._annotations = copy.copy(t._annotations)
+                s.fill_from(t)
+                s.set_custom("module", t.acquire_custom("module")) # fix bug
 
             s.append(l.detach())
 
@@ -611,8 +642,21 @@ class Processor:
         return tree
 
     #
+    def transform_modules(self, tree):
+        """ it extracts modules (from annotations) and store them to nodes hierarchy  """
+
+        lines = Processor._collect(root)
+        lines = [ ( l, s.strip() ) for l in lines for s in l.annotation('module') if (not l.is_role()) ]
+        for l, s in lines:
+            if (not s): continue
+            l.set_custom("module", s.lower().capitalize())
+
+        return tree
+
+    #
     def transform(self, tree):
         """ it applies transformations to the tree just before its reporting """
+        if (self._modules): tree = self.transform_modules(tree)
         if (self._stages): tree = self.transform_stages(tree)
         return tree
 
@@ -638,8 +682,8 @@ class Processor:
 
     #
     @staticmethod
-    def _cf_cache(theme):
-        """ build cell-format cache """
+    def _apply_format(theme):
+        """ build cell-format cache apply function """
 
         _filter_map = lambda map, prefix: {
             k[len(prefix):]: v for (k, v) in map.items() if k.startswith(prefix)
@@ -670,7 +714,7 @@ class Processor:
             }) or None
         )
 
-        return FormatCache(
+        _cf_cache = FormatCache(
             format=lambda f: theme.format(f),
             register=lambda f: {
                 'font': _cf_font_cache.get( _filter_map(f, 'font_') ),
@@ -681,38 +725,35 @@ class Processor:
             }
         )
 
+        def _apply_format(cell, *f):
+            f = _cf_cache.get(*f)
+            for x in ('font', 'fill', 'alignment', 'number_format'):
+                v = f.get(x, None)
+                if v is not None: setattr(cell, x, v)
+            return cell
+
+        return _apply_format
 
     #
-    def _report(self, root, ws):
+    @staticmethod
+    def _cell_names(i=0):
+        def _name(number, alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZ'):
+            base = ''
+            while number:
+                number, i = divmod(number, len(alphabet))
+                base = alphabet[i] + base
+            return base or alphabet[0]
+        while True:
+            yield _name(i)
+            i += 1
+
+    #
+    def _report_root(self, root, wb):
         # see https://en.wikipedia.org/wiki/Three-point_estimation
 
         # first transform tree to lines
         lines = Processor._collect(root)
         if (not lines): return # do nothing with empty document
-
-        # cell format cache
-        _cf_cache = Processor._cf_cache(self._theme)
-
-        # helper functions
-        cell  = lambda c, r: "%s%s" % (c, (1+r))
-        cells = lambda c, r: "%s:%s" % (cell(c, r[0]), cell(c, r[1]))
-
-        def _apply_format(c, *f):
-            f = _cf_cache.get(*f)
-            for x in ('font', 'fill', 'alignment', 'number_format'):
-                v = f.get(x, None)
-                if v is not None: setattr(c, x, v)
-            return c
-
-        def _hide_column(c, hidden=True): ws.column_dimensions[c].hidden = hidden
-        def _hide_row(r, hidden=True): ws.row_dimensions[1+r].hidden = hidden
-
-        def _column(c, width, f): _apply_format(ws.column_dimensions[c], f).width = width
-        def _string(c, r, string, *f): _apply_format(ws[cell(c, r)], *f).value = string
-        def _number(c, r, number, *f): _apply_format(ws[cell(c, r)], self._theme.F_NUMBERS, *f).value = number
-        def _formula(c, r, formula, *f): _apply_format(ws[cell(c, r)], self._theme.F_NUMBERS, *f).value = formula
-        def _boolean(c, r, bool, *f): _apply_format(ws[cell(c, r)], self._theme.F_BOOLEAN, *f).value = (bool and 1 or 0)
-        def _blank(c, r, *f): _string(c, r, '', *f)
 
         # init format (style) table
         f_caption = self._theme.F_CAPTION
@@ -724,57 +765,121 @@ class Processor:
         f_final = self._theme.F_FINAL
         f_multiplier = self._theme.F_MULTIPLIER
 
+        # cell format cache
+        _apply_format = Processor._apply_format(self._theme)
+
+        # helper functions
+        cell  = lambda c, r: "%s%s" % (c, (1+r)) if c else None
+        cells = lambda c, r: "%s:%s" % (cell(c, r[0]), cell(c, r[1])) if c else None
+
+        def __hide_row(ws):
+            def _(r, hidden=True):
+                ws.row_dimensions[1+r].hidden = hidden
+            return _
+
+        def __hide_column(ws):
+            def _(c, hidden=True):
+                if (c): ws.column_dimensions[c].hidden = hidden
+            return _
+
+        def __column(ws):
+            def _(c, width, f):
+                if (c): _apply_format(ws.column_dimensions[c], f).width = width
+            return _
+
+        def __string(ws):
+            def _(c, r, string, *f):
+                if (c): _apply_format(ws[cell(c, r)], *f).value = string
+            return _
+
+        def __number(ws):
+            def _(c, r, number, *f):
+                if (c): _apply_format(ws[cell(c, r)], self._theme.F_NUMBERS, *f).value = number
+            return _
+
+        def __formula(ws):
+            def _(c, r, formula, *f):
+                if (c):
+                    _apply_format(ws[cell(c, r)], self._theme.F_NUMBERS, *f).value = formula
+            return _
+
+        def __boolean(ws):
+            def _(c, r, bool, *f):
+                if (c): _apply_format(ws[cell(c, r)], self._theme.F_BOOLEAN, *f).value = (bool and 1 or 0)
+            return _
+
+        def __blank(ws):
+            def _(c, r, *f):
+                if (c): _apply_format(ws[cell(c, r)], *f).value = ''
+            return _
+
+        # --------------
+        # esitmates page
+
+        ws = wb.active
+        ws.title = 'Estimates'
+
+        _hide_column = __hide_column(ws)
+        _hide_row = __hide_row(ws)
+        _column = __column(ws)
+        _string = __string(ws)
+        _number = __number(ws)
+        _formula = __formula(ws)
+        _boolean = __boolean(ws)
+        _blank = __blank(ws)
+
         # --------------
         # define columns
 
-        def _cell_name(number, alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZ'):
-            base = ''
-            while number:
-                number, i = divmod(number, len(alphabet))
-                base = alphabet[i] + base
-            return base or alphabet[0]
+        _cells = Processor._cell_names()
 
-        def _cell_names(i=0):
-            while True:
-                yield _cell_name(i)
-                i += 1
+        LEVELS = []
+        if (self._unpivot_tree):
+            max_level = 0
+            for l in lines:
+                if (l.is_role()): continue
+                if (not l.estimates()): continue
+                max_level = max(max_level, l.level())
 
-        _cells = _cell_names()
+            LEVELS = [ (l, _cells.next()) for l in range(max_level) ]
 
-        B0 = _cells.next()  # A: caption
-        B1 = _cells.next()  # B: visibility
-        B2 = _cells.next()  # C: empty/MVP/Stage
+        B0 = _cells.next() if (not self._unpivot_tree) else None   # A: caption
+        B1 = _cells.next()                                         # B: visibility
+        B2 = _cells.next()                                         # C: empty/MVP/Stage
 
-        S0 = _cells.next()  # D: structure1 (module, submodule, ...)
-        S1 = _cells.next()  # E: structure2 (...)
-        S2 = _cells.next()  # F: structure3 (...)
-        S3 = _cells.next()  # G: structure4 (...)
+        S0 = _cells.next()                                         # D: structure1 (module, submodule, ...)
+        S1 = _cells.next() if (not self._unpivot_tree) else None   # E: structure2 (...)
+        S2 = _cells.next() if (not self._unpivot_tree) else None   # F: structure3 (...)
+        S3 = _cells.next() if (not self._unpivot_tree) else None   # G: structure4 (...)
 
-        C0 = _cells.next()  # H: comment
+        C0 = _cells.next()                                         # H: comment
 
-        E0 = _cells.next()  # I: estimate-0
-        E1 = _cells.next()  # J: estimate-1
-        E2 = _cells.next()  # K: estimate-2
-        E3 = _cells.next()  # L: estimate-separator
-        E4 = _cells.next()  # M: estimate-wm
-        E5 = _cells.next()  # N: estimate-st
-        E6 = _cells.next()  # O: estimate-sq
+        E0 = _cells.next()                                         # I: estimate-0
+        E1 = _cells.next()                                         # J: estimate-1
+        E2 = _cells.next()                                         # K: estimate-2
+        E3 = _cells.next() if (not self._unpivot_tree) else None   # L: estimate-separator
+        E4 = _cells.next()                                         # M: estimate-wm
+        E5 = _cells.next()                                         # N: estimate-st
+        E6 = _cells.next()                                         # O: estimate-sq
 
-        R0 = _cells.next()  # P: role name
+        R0 = _cells.next()                                         # P: role name
 
         del _cells
 
-        # ------------
-        # setup header
+        # -------------
+        # setup columns
+
+        for LI, LL in LEVELS:
+            _column(LL, width=20, f=self._theme.F_DEFAULT)
 
         # setup columns: base columns
-        _column(B0, width=40, f=self._theme.F_DEFAULT)
+        _column(B0, width=50, f=self._theme.F_DEFAULT)
         _column(B1, width=3,  f=self._theme.F_MULTIPLIER)
         _column(B2, width=8,  f=self._theme.F_DEFAULT)
-        _column(S0, width=10, f=self._theme.F_COMMENT)
-        _column(S1, width=20, f=self._theme.F_COMMENT)
-        _column(S2, width=20, f=self._theme.F_COMMENT)
-        _column(S3, width=20, f=self._theme.F_COMMENT)
+        _column(S0, width=50, f=self._theme.F_COMMENT)
+        _column(S1, width=10, f=self._theme.F_COMMENT)
+        _column(S2, width=10, f=self._theme.F_COMMENT)
+        _column(S3, width=10, f=self._theme.F_COMMENT)
         _column(C0, width=50, f=self._theme.F_COMMENT)
         _column(E0, width=8,  f=self._theme.F_NUMBERS)
         _column(E1, width=8,  f=self._theme.F_NUMBERS)
@@ -789,8 +894,11 @@ class Processor:
         if (not self._filter_visibility):
             _hide_column(B1, hidden=True)
 
+        # hide module if required
+        if (not self._modules):
+            _hide_column(S0, hidden=True)
+
         # hide structure columns
-        _hide_column(S0, hidden=True)
         _hide_column(S1, hidden=True)
         _hide_column(S2, hidden=True)
         _hide_column(S3, hidden=True)
@@ -801,8 +909,15 @@ class Processor:
         # start rows
         row = 0
 
-        # header (row = 1)
+        # ----------------------
+        # setup header (row = 1)
         f_header = self._theme.F_HEADER
+
+        # header: levels
+        for LI, LL in LEVELS:
+            _string(LL, row, 'Level %s' % (1 + LI), f_header) # LL: level
+
+        # headef: fixed columns
         _string(B0, row, 'Task / Subtask', f_header)  # B0: caption
         _string(B1, row, 'Filter', f_header)          # B1: visibility
         _string(B2, row, '', f_header)                # B2: empty/MVP/Stage
@@ -867,9 +982,9 @@ class Processor:
 
         def _stage_to_string(node):
             if (self._stages):
-                stage = node.acquire('_stage')
+                stage = node.acquire_custom('stage')
                 if (stage):
-                    return '%s' % ('.'.join(str(x) for x in stage))
+                    return '.'.join(str(x) for x in stage)
             return ''
 
         # ------------------------
@@ -878,6 +993,7 @@ class Processor:
         # lines
         stages = set()
         roles = set()
+        modules = set()
         row_lines = {}
         for l in lines:
 
@@ -885,12 +1001,17 @@ class Processor:
             role = l.is_role()
             if (role and (not self._roles)): continue
 
+            # obtain estimations for the row (total, aggregated from the node and its roles)
+            estimates = l.estimates()
+
+            # unpivot has to hide all axillary rows
+            if (self._unpivot_tree):
+                if (estimates is None):
+                    continue
+
             # let's start
             row += 1
             row_lines[id(l)] = row
-
-            # obtain estimations for the row (total, aggregated from the node and its roles)
-            estimates = l.estimates()
 
             # validation over mvp column
             if (self._validation and self._mvp):
@@ -900,6 +1021,14 @@ class Processor:
                 else:
                     # no mvp selection is allowed for non-estimate rows
                     dv_mvp_empty.ranges.append(cells(B2, (row, row)))
+
+            # levels, if exists
+            for LI, LL in LEVELS:
+                p = l.parent(level=LI)
+                if (p.level() == LI):
+                    _string(LL, row, p.title()) # LL: level
+                else:
+                    _blank(LL, row) # LL: level
 
             # ----------------------
             # special case for roles (they are just info rows)
@@ -915,7 +1044,7 @@ class Processor:
                 _string(B0, row, l.title_with_level(), f_role)          # B0 (title)
                 _number(B1, row, 0, f_role, f_multiplier)               # B1 (visibility/multiplier)
                 _blank(B2, row, f_role)                                 # B2 (empty/MVP/Stage)
-                _formula(R0, row, '=TRIM(%s)' % cell(B0, row), f_row)   # R0 (role)
+                _formula(R0, row, '=TRIM(%s)' % cell(B0, row), f_role)  # R0 (role)
                 _string(S0, row, '', f_role)                            # S0 (module, submodule, ...)
                 _string(S1, row, '', f_role)                            # S1 (comment)
                 _string(S2, row, '', f_role)                            # S2 (comment)
@@ -967,6 +1096,14 @@ class Processor:
             if (multiplier):
                 _number(B1, row, 1, f_row, f_multiplier) # B1 (visibility/multiplier)
 
+            # modules
+            if (self._modules):
+                module = l.acquire_custom('module')
+                if (not module): module = ""
+                modules.add(module)
+                f_row_x = f_row if (estimates is not None) else f_role
+                _string(S0, row, module, f_row_x) # B2 (Stage, all rows)
+
             # setup MVP/Stage for non-role rows
             if (self._mvp):
                 if (estimates is not None):
@@ -977,10 +1114,8 @@ class Processor:
                 stage = _stage_to_string(l)
                 if (not stage): stage = "(?)"
                 stages.add(stage)
-                if (estimates is not None):
-                    _string(B2, row, stage, f_row) # B2 (Stage, all rows)
-                else:
-                    _string(B2, row, stage, f_role) # B2 (Stage, all rows)
+                f_row_x = f_row if (estimates is not None) else f_role
+                _string(B2, row, stage, f_row_x) # B2 (Stage, all rows)
 
             # fill estimates
             if (estimates is not None):
@@ -991,6 +1126,12 @@ class Processor:
                 _formula(E5, row, '=(%s-%s)/6' % (cell(E2, row), cell(E0, row)), f_row, f_estimates)                      # E2 (standard deviation)
                 _formula(E6, row, '=%s*%s' % (cell(E5, row), cell(E5, row)), f_row, f_estimates)                          # E3 (squared deviation)
 
+        # ------------------------------------
+        # -- no footer if it's a pivot mode --
+
+        if (self._unpivot_tree):
+            # no header, no formulas, no roles, no life, no fun....
+            return
 
         # -------------------------------------
         # change estimation numbers to formulas
@@ -1066,10 +1207,10 @@ class Processor:
             _string(E3, row_total, '', f_total)                                                                      # E3
             _formula(E4, row_total, '=SUMIFS(%s,%s)' % (cells(E4, row_lines), row_criteria), f_total, f_estimates)   # E4 (sum)
             _formula(E5, row_total, '=SUMIFS(%s,%s)' % (cells(E5, row_lines), row_criteria), f_total, f_estimates)   # E5 (sum)
-            _formula(E6, row_total, '=SUMIFS(%s,%s)' % (cells(E6, row_lines), row_criteria), f_total, f_estimates)   # E6 (sum)
+            _formula(E6, row_total, '=SUMIFS(%s,%s)' % (cells(E6, row_lines), row_criteria), f_total, f_estimates)   # E6 (sum,sd)
             return row_total
 
-        def _partial(row_total, row_footer, caption, row_criteria='%s,"=1"' % (cells(B1, row_lines))):
+        def _partial(row_total, row_footer, caption, row_criteria='%s,"=1"' % (cells(B1, row_lines)), sd=False):
             # partial total row
             _string(B0, row_footer, caption, f_total)                                                                # B0 (caption)
             _string(B1, row_footer, '', f_total)                                                                     # B1 (hidden)
@@ -1082,8 +1223,10 @@ class Processor:
             _formula(E0, row_footer, '=SUMIFS(%s,%s)' % (cells(E0, row_lines), row_criteria), f_total, f_estimates)  # E0 (sum)
             _formula(E1, row_footer, '=SUMIFS(%s,%s)' % (cells(E1, row_lines), row_criteria), f_total, f_estimates)  # E1 (sum)
             _formula(E2, row_footer, '=SUMIFS(%s,%s)' % (cells(E2, row_lines), row_criteria), f_total, f_estimates)  # E2 (sum)
-            _formula(E4, row_footer, '=(%s+4*%s+%s)/6' % (cell(E0, row_footer), cell(E1, row_footer), cell(E2, row_footer)), f_total, f_estimates) # E4 (total)
+            _formula(E4, row_footer, '=(%s+4*%s+%s)/6' % (cell(E0, row_footer), cell(E1, row_footer), cell(E2, row_footer)), f_total, f_estimates) # E4 (local,total)
             _formula(E5, row_footer, '=(%s/%s)' % (cell(E4, row_footer), cell(E4, row_total)), f_percentage)         # E5 (%)
+            if (sd):
+                _formula(E6, row_footer, '=SUMIFS(%s,%s)' % (cells(E6, row_lines), row_criteria), f_estimates)           # E6 (sum,sd)
             return row_footer
 
         # total values (all)
@@ -1104,7 +1247,8 @@ class Processor:
                     caption='  - %s' % role.strip('()'),
                     row_criteria='''%s,"=0",%s,"%s"''' % (cells(B1, row_lines), cells(R0, row_lines), role)
                 )
-            del roles
+            #del roles
+            #del role
 
         if (self._mvp):
             # one extra line
@@ -1132,24 +1276,49 @@ class Processor:
                     row_total=row_total,
                     row_footer=row_footer,
                     caption=' - Stage %s' % stage,
-                    row_criteria='%s,"=1",%s,"=%s"' % (cells(B1, row_lines), cells(B2, row_lines), stage)
+                    row_criteria='%s,"=1",%s,"%s"' % (cells(B1, row_lines), cells(B2, row_lines), stage)
                 )
-            del stages
+            #del stages
+            #del stage
 
-            # filter (TODO)
-            # ws.auto_filter.add_filter_column((ord(B2)-ord('A')), ["1"], blank=True)
+            # TODO: filter: ws.auto_filter.add_filter_column((ord(B2)-ord('A')), stages, blank=True)
+
+        if (self._modules):
+
+            # one extra line
+            row_footer += 1
+
+            # total (module) values
+            modules = list(modules)
+            modules.sort()
+            for module in modules:
+                row_footer += 1
+                row_footer = _partial(
+                    row_total=row_total,
+                    row_footer=row_footer,
+                    caption='- %s' % (('Module «%s»' % module) if module else "Common"),
+                    row_criteria='%s,"=1",%s,"%s"' % (cells(B1, row_lines), cells(S0, row_lines), module)
+                )
+            #del modules
+            #del module
+
+            # TODO: filter: ws.auto_filter.add_filter_column((ord(S0)-ord('A')), modules, blank=True)
 
         # one extra line
         row_footer += 1
 
         # sigma: standard deviation
+        def _sigma(row_sigma, row_total):
+            _string(B0, row_sigma, 'Standard deviation', f_caption)                     # B0 (caption)
+            _formula(B2, row_sigma, '=SQRT(%s)' % (cell(E6, row_total)), f_estimates)   # B2 (sigma)
+            _formula(C0, row_sigma, '=%s/%s' % (cell(B2, row_sigma), cell(E4, row_total)), f_percentage)     # C0 (sigma,percentage)
+            return row_sigma
+
         row_footer += 1
-        row_sigma = row_footer
-        _string(B0, row_sigma, 'Standard deviation', f_caption)                     # B0 (caption)
-        _formula(B2, row_sigma, '=SQRT(%s)' % (cell(E6, row_total)), f_estimates)   # B2 (sigma)
+        row_sigma = _sigma(row_footer, row_total)
 
         # factors
-        if (self._factors):
+        if (self._corrections):
             row_footer += 1
             _string(B0, row_footer, 'K:', f_caption)                   # B0 (caption)
 
@@ -1162,7 +1331,7 @@ class Processor:
             kappa_rows.append(row_footer)
 
             # factors (from options)
-            for f, v in self._factors.items():
+            for f, v in self._corrections.items():
                 row_footer += 1
                 _string(B0, row_footer, ' + %s' % f, f_caption)        # B0 (caption)
                 _number(B2, row_footer, v, f_estimates, f_percentage)  # B2 (kappa)
@@ -1211,34 +1380,89 @@ class Processor:
         # empty line
         row_footer += 1
 
+        # Min/Max (P=95/99%)
+        def _final(row_footer, sign, row_total=row_total, row_sigma=row_sigma, caption=""):
+            caption += { '-': 'Min', '+': 'Max' }[sign]
+            caption += ' (%s)' % p_title
+            _string(B0, row_footer, caption, f_total)               # B0 (caption)
+            _string(B1, row_footer, '', f_total)                    # B1
+            _formula(B2, row_footer, '=%s%s%s*%s' % (cell(E4, row_total), sign, p_multiplier, cell(B2, row_sigma)), f_total, f_estimates)  # B2 (min/max)
+            _string(S0, row_footer, '', f_total)                                                                                    # S0
+            _string(S1, row_footer, '', f_total)                                                                                    # S1
+            _string(S2, row_footer, '', f_total)                                                                                    # S2
+            _string(S3, row_footer, '', f_total)                                                                                    # S3
+            _formula(C0, row_footer, '=%s*%s' % (cell(B2, row_footer), cell(B2, row_kappa)),  f_final, f_estimates)                 # C0 (modified)
+            return row_footer
+
         # Min (P=95/99%)
         row_footer += 1
-        _string(B0, row_footer, 'Min (%s)' % p_title, f_total)  # B0 (caption)
-        _string(B1, row_footer, '', f_total)                    # B1
-        _formula(B2, row_footer, '=%s-%s*%s' % (cell(E4, row_total), p_multiplier, cell(B2, row_sigma)), f_total, f_estimates)  # B2 (min)
-        _string(S0, row_footer, '', f_total)                                                                                    # S0
-        _string(S1, row_footer, '', f_total)                                                                                    # S1
-        _string(S2, row_footer, '', f_total)                                                                                    # S2
-        _string(S3, row_footer, '', f_total)                                                                                    # S3
-        _formula(C0, row_footer, '=%s*%s' % (cell(B2, row_footer), cell(B2, row_kappa)),  f_final, f_estimates)                 # C0 (modified)
+        row_footer = _final(row_footer, sign="-")
 
         # Max (P=95/99%)
         row_footer += 1
-        _string(B0, row_footer, 'Max (%s)' % p_title, f_total)  # B0 (caption)
-        _string(B1, row_footer, '', f_total)                    # B1
-        _formula(B2, row_footer, '=%s+%s*%s' % (cell(E4, row_total), p_multiplier, cell(B2, row_sigma)), f_total, f_estimates)  # B2 (max)
-        _string(S0, row_footer, '', f_total)                                                                                    # S0
-        _string(S1, row_footer, '', f_total)                                                                                    # S1
-        _string(S2, row_footer, '', f_total)                                                                                    # S2
-        _string(S3, row_footer, '', f_total)                                                                                    # S3
-        _formula(C0, row_footer, '=%s*%s' % (cell(B2, row_footer), cell(B2, row_kappa)),  f_final, f_estimates)                 # C0 (modified)
+        row_footer = _final(row_footer, sign="+")
+
+        # -----------------------
+        # Stages & Modules report
+        if (self._stages and self._modules and len(stages) > 1 and len(modules) > 1):
+
+            # empty line
+            row_footer += 4
+
+            for stage in stages:
+
+                s_lines = [ l for l in lines if _stage_to_string(l) == stage ]
+                if (not s_lines): continue
+
+                row_footer += 1
+                row_stage = row_footer = _partial(
+                    row_total=row_total,
+                    row_footer=row_footer,
+                    caption='Stage %s' % stage,
+                    row_criteria='%s,"=1",%s,"%s"' % (cells(B1, row_lines), cells(B2, row_lines), stage),
+                    sd=True
+                )
+
+                for module in modules:
+
+                    #m_lines = [ l for l in s_lines if l.acquire_custom("module") == module ]
+                    #if (not m_lines): continue
+
+                    row_footer += 1
+                    row_footer = _partial(
+                        row_total=row_stage,
+                        row_footer=row_footer,
+                        caption=' - %s' % (('Module «%s»' % module) if module else "Common"),
+                        row_criteria='%s,"=1",%s,"%s",%s,"%s"' % (
+                            cells(B1, row_lines),
+                            cells(B2, row_lines), stage,
+                            cells(S0, row_lines), module
+                        )
+                    )
+
+                # sigma: standard deviation
+                row_footer += 1
+                row_sigma = _sigma(row_footer, row_total=row_stage)
+
+                # Min (P=95/99%)
+                row_footer += 1
+                row_footer = _final(row_footer, row_total=row_stage, row_sigma=row_sigma, sign="-")
+
+                # Max (P=95/99%)
+                row_footer += 1
+                row_footer = _final(row_footer, row_total=row_stage, row_sigma=row_sigma, sign="+")
+
+                # yet another empty
+                row_footer += 1
+
+
+        return row_lines
 
     # create a report
     def report(self, root, filename):
         wb = Processor.pyxl.Workbook()
-        ws = wb.active
-        ws.title = 'Estimates'
-        self._report(root, ws)
+        self._report_root(root, wb)
+
         if (filename):
             wb.save(filename=filename)
         return wb
@@ -1258,6 +1482,13 @@ if __name__ == "__main__":
         action='store',
         dest=Processor.OPT_FACTOR,
         help='''use a given factor for estimates (default = 1.0)'''
+    )
+
+    parser.add_argument(
+        '--role-factors',
+        action='store',
+        dest=Processor.OPT_ROLE_FACTORS,
+        help='''use a given factors for roles (in format role1:v1,role2:v2,role3:v3,...)'''
     )
 
     parser.add_argument(
@@ -1307,7 +1538,7 @@ if __name__ == "__main__":
         '--formulas',
         action='store_true',
         dest=Processor.OPT_FORMULAS,
-        help='''use formulas for estimation numbers'''
+        help='''use formulas for estimation numbers (roles are required)'''
     )
 
     # this option doesn't work for LibreOffice (due to the bug it doesn't recognize initial filter state)
@@ -1334,10 +1565,25 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        '--factors',
+        '--modules',
+        action='store_true',
+        dest=Processor.OPT_MODULES,
+        help='''transformation: use modules markers as nodes/subtree groups'''
+    )
+
+    parser.add_argument(
+        '--corrections',
         action='store',
-        dest=Processor.OPT_FACTORS,
-        help='''use extra factors with default values (in format f1:v1,f2:v2,f3:v3,...)'''
+        dest=Processor.OPT_CORRECTIONS,
+        help='''use extra corrections with default values (in format f1:v1,f2:v2,f3:v3,...)'''
+    )
+
+    # experimental
+    parser.add_argument(
+        '--unpivot-tree',
+        action='store_true',
+        dest=Processor.OPT_UNPIVOT_TREE,
+        help='''show hierarchy columns (level by level) before the table items (it turns off the header and features as roles, formulas, ...)'''
     )
 
     parser.add_argument(
