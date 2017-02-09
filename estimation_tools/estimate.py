@@ -820,13 +820,13 @@ class Processor:
         ws.title = 'Estimates'
 
         _hide_column = __hide_column(ws)
-        _hide_row = __hide_row(ws)
-        _column = __column(ws)
-        _string = __string(ws)
-        _number = __number(ws)
-        _formula = __formula(ws)
-        _boolean = __boolean(ws)
-        _blank = __blank(ws)
+        _hide_row    = __hide_row(ws)
+        _column      = __column(ws)
+        _string      = __string(ws)
+        _number      = __number(ws)
+        _formula     = __formula(ws)
+        _boolean     = __boolean(ws)
+        _blank       = __blank(ws)
 
         # --------------
         # define columns
@@ -1191,7 +1191,7 @@ class Processor:
         # ---------
         # total row
 
-        def _total(row_total, caption='Total', row_criteria='%s,"=1"' % (cells(B1, row_lines))):
+        def _total(row_total, caption='Total', row_criteria='%s,"=1"' % (cells(B1, row_lines)), prefix="%s!" % ws.title):
             # total values (it uses row_mul to avoid duuble calculations for roles)
             _string(B0, row_total, caption, f_total)                                                                 # B0 (caption)
             _string(B1, row_total, '', f_total)                                                                      # B1 (hidden)
@@ -1201,16 +1201,16 @@ class Processor:
             _string(S2, row_total, '', f_total)                                                                      # S2
             _string(S3, row_total, '', f_total)                                                                      # S3
             _string(C0, row_total, '', f_total)                                                                      # C0
-            _formula(E0, row_total, '=SUMIFS(%s,%s)' % (cells(E0, row_lines), row_criteria), f_total, f_estimates)   # E0 (sum)
-            _formula(E1, row_total, '=SUMIFS(%s,%s)' % (cells(E1, row_lines), row_criteria), f_total, f_estimates)   # E1 (sum)
-            _formula(E2, row_total, '=SUMIFS(%s,%s)' % (cells(E2, row_lines), row_criteria), f_total, f_estimates)   # E2 (sum)
+            _formula(E0, row_total, '=SUMIFS(%s%s,%s)' % (prefix, cells(E0, row_lines), row_criteria), f_total, f_estimates)   # E0 (sum)
+            _formula(E1, row_total, '=SUMIFS(%s%s,%s)' % (prefix, cells(E1, row_lines), row_criteria), f_total, f_estimates)   # E1 (sum)
+            _formula(E2, row_total, '=SUMIFS(%s%s,%s)' % (prefix, cells(E2, row_lines), row_criteria), f_total, f_estimates)   # E2 (sum)
             _string(E3, row_total, '', f_total)                                                                      # E3
-            _formula(E4, row_total, '=SUMIFS(%s,%s)' % (cells(E4, row_lines), row_criteria), f_total, f_estimates)   # E4 (sum)
-            _formula(E5, row_total, '=SUMIFS(%s,%s)' % (cells(E5, row_lines), row_criteria), f_total, f_estimates)   # E5 (sum)
-            _formula(E6, row_total, '=SUMIFS(%s,%s)' % (cells(E6, row_lines), row_criteria), f_total, f_estimates)   # E6 (sum,sd)
+            _formula(E4, row_total, '=SUMIFS(%s%s,%s)' % (prefix, cells(E4, row_lines), row_criteria), f_total, f_estimates)   # E4 (sum)
+            _formula(E5, row_total, '=SUMIFS(%s%s,%s)' % (prefix, cells(E5, row_lines), row_criteria), f_total, f_estimates)   # E5 (sum)
+            _formula(E6, row_total, '=SUMIFS(%s%s,%s)' % (prefix, cells(E6, row_lines), row_criteria), f_total, f_estimates)   # E6 (sum,sd)
             return row_total
 
-        def _partial(row_total, row_footer, caption, row_criteria='%s,"=1"' % (cells(B1, row_lines)), sd=False):
+        def _partial(row_footer, caption, total_cell, row_criteria='%s,"=1"' % (cells(B1, row_lines)), sd=False, prefix="%s!" % ws.title):
             # partial total row
             _string(B0, row_footer, caption, f_total)                                                                # B0 (caption)
             _string(B1, row_footer, '', f_total)                                                                     # B1 (hidden)
@@ -1220,13 +1220,13 @@ class Processor:
             _string(S2, row_footer, '', f_total)                                                                     # S2
             _string(S3, row_footer, '', f_total)                                                                     # S3
             _string(C0, row_footer, '', f_total)                                                                     # C0
-            _formula(E0, row_footer, '=SUMIFS(%s,%s)' % (cells(E0, row_lines), row_criteria), f_total, f_estimates)  # E0 (sum)
-            _formula(E1, row_footer, '=SUMIFS(%s,%s)' % (cells(E1, row_lines), row_criteria), f_total, f_estimates)  # E1 (sum)
-            _formula(E2, row_footer, '=SUMIFS(%s,%s)' % (cells(E2, row_lines), row_criteria), f_total, f_estimates)  # E2 (sum)
+            _formula(E0, row_footer, '=SUMIFS(%s%s,%s)' % (prefix, cells(E0, row_lines), row_criteria), f_total, f_estimates)  # E0 (sum)
+            _formula(E1, row_footer, '=SUMIFS(%s%s,%s)' % (prefix, cells(E1, row_lines), row_criteria), f_total, f_estimates)  # E1 (sum)
+            _formula(E2, row_footer, '=SUMIFS(%s%s,%s)' % (prefix, cells(E2, row_lines), row_criteria), f_total, f_estimates)  # E2 (sum)
             _formula(E4, row_footer, '=(%s+4*%s+%s)/6' % (cell(E0, row_footer), cell(E1, row_footer), cell(E2, row_footer)), f_total, f_estimates) # E4 (local,total)
-            _formula(E5, row_footer, '=(%s/%s)' % (cell(E4, row_footer), cell(E4, row_total)), f_percentage)         # E5 (%)
+            _formula(E5, row_footer, '=(%s/%s)' % (cell(E4, row_footer), total_cell), f_percentage)         # E5 (%)
             if (sd):
-                _formula(E6, row_footer, '=SUMIFS(%s,%s)' % (cells(E6, row_lines), row_criteria), f_estimates)           # E6 (sum,sd)
+                _formula(E6, row_footer, '=SUMIFS(%s%s,%s)' % (prefix, cells(E6, row_lines), row_criteria), f_estimates)           # E6 (sum,sd)
             return row_footer
 
         # total values (all)
@@ -1242,10 +1242,10 @@ class Processor:
             for role in roles:
                 row_footer += 1
                 row_footer = _partial(
-                    row_total=row_total,
                     row_footer=row_footer,
                     caption='  - %s' % role.strip('()'),
-                    row_criteria='''%s,"=0",%s,"%s"''' % (cells(B1, row_lines), cells(R0, row_lines), role)
+                    row_criteria='''%s,"=0",%s,"%s"''' % (cells(B1, row_lines), cells(R0, row_lines), role),
+                    total_cell=cell(E4, row_total)
                 )
             #del roles
             #del role
@@ -1273,10 +1273,10 @@ class Processor:
             for stage in stages:
                 row_footer += 1
                 row_footer = _partial(
-                    row_total=row_total,
                     row_footer=row_footer,
                     caption=' - Stage %s' % stage,
-                    row_criteria='%s,"=1",%s,"%s"' % (cells(B1, row_lines), cells(B2, row_lines), stage)
+                    row_criteria='%s,"=1",%s,"%s"' % (cells(B1, row_lines), cells(B2, row_lines), stage),
+                    total_cell=cell(E4, row_total)
                 )
             #del stages
             #del stage
@@ -1294,10 +1294,10 @@ class Processor:
             for module in modules:
                 row_footer += 1
                 row_footer = _partial(
-                    row_total=row_total,
                     row_footer=row_footer,
                     caption='- %s' % (('Module «%s»' % module) if module else "Common"),
-                    row_criteria='%s,"=1",%s,"%s"' % (cells(B1, row_lines), cells(S0, row_lines), module)
+                    row_criteria='%s,"=1",%s,"%s"' % (cells(B1, row_lines), cells(S0, row_lines), module),
+                    total_cell=cell(E4, row_total)
                 )
             #del modules
             #del module
@@ -1381,7 +1381,7 @@ class Processor:
         row_footer += 1
 
         # Min/Max (P=95/99%)
-        def _final(row_footer, sign, row_total=row_total, row_sigma=row_sigma, caption=""):
+        def _final(row_footer, sign, row_total=row_total, row_sigma=row_sigma, caption="", prefix="%s!" % ws.title):
             caption += { '-': 'Min', '+': 'Max' }[sign]
             caption += ' (%s)' % p_title
             _string(B0, row_footer, caption, f_total)               # B0 (caption)
@@ -1391,7 +1391,7 @@ class Processor:
             _string(S1, row_footer, '', f_total)                                                                                    # S1
             _string(S2, row_footer, '', f_total)                                                                                    # S2
             _string(S3, row_footer, '', f_total)                                                                                    # S3
-            _formula(C0, row_footer, '=%s*%s' % (cell(B2, row_footer), cell(B2, row_kappa)),  f_final, f_estimates)                 # C0 (modified)
+            _formula(C0, row_footer, '=%s*%s%s' % (cell(B2, row_footer), prefix, cell(B2, row_kappa)),  f_final, f_estimates)                 # C0 (modified)
             return row_footer
 
         # Min (P=95/99%)
@@ -1406,8 +1406,17 @@ class Processor:
         # Stages & Modules report
         if (self._stages and self._modules and len(stages) > 1 and len(modules) > 1):
 
-            # empty line
-            row_footer += 4
+            ws = wb.create_sheet("Stages & Modules")
+            row_footer = 0
+
+            _hide_column = __hide_column(ws)
+            _hide_row    = __hide_row(ws)
+            _column      = __column(ws)
+            _string      = __string(ws)
+            _number      = __number(ws)
+            _formula     = __formula(ws)
+            _boolean     = __boolean(ws)
+            _blank       = __blank(ws)
 
             for stage in stages:
 
@@ -1416,10 +1425,13 @@ class Processor:
 
                 row_footer += 1
                 row_stage = row_footer = _partial(
-                    row_total=row_total,
                     row_footer=row_footer,
                     caption='Stage %s' % stage,
-                    row_criteria='%s,"=1",%s,"%s"' % (cells(B1, row_lines), cells(B2, row_lines), stage),
+                    row_criteria='Estimates!%s,"=1",Estimates!%s,"%s"' % (
+                        cells(B1, row_lines),
+                        cells(B2, row_lines), stage
+                    ),
+                    total_cell='Estimates!%s' % cell(E4, row_total),
                     sd=True
                 )
 
@@ -1430,14 +1442,14 @@ class Processor:
 
                     row_footer += 1
                     row_footer = _partial(
-                        row_total=row_stage,
                         row_footer=row_footer,
                         caption=' - %s' % (('Module «%s»' % module) if module else "Common"),
-                        row_criteria='%s,"=1",%s,"%s",%s,"%s"' % (
+                        row_criteria='Estimates!%s,"=1",Estimates!%s,"%s",Estimates!%s,"%s"' % (
                             cells(B1, row_lines),
                             cells(B2, row_lines), stage,
                             cells(S0, row_lines), module
-                        )
+                        ),
+                        total_cell=cell(E4, row_stage)
                     )
 
                 # sigma: standard deviation
