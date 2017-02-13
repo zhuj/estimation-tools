@@ -83,6 +83,12 @@ class ReportTestCase(unittest.TestCase):
             row -= 1
             self.assertTrue( row > 1 )
 
+        # empty
+        while True:
+            self.assertTrue( row > 1 )
+            if ( _val(ws, 'A%s' % row) != '' ): break
+            row -= 1
+
         # total
         self.assertTrue( row > 1 )
         self.assertTrue( _val(ws, 'A%s' % row).startswith('Total') )
@@ -279,6 +285,8 @@ class ReportTestCase(unittest.TestCase):
         options = dict({
             estimate.Processor.OPT_ROLES: True,
             estimate.Processor.OPT_VALIDATION: True,
+            estimate.Processor.OPT_UNPIVOT_TREE: False,
+            estimate.Processor.OPT_SEPARATE_FOOTER: False
         }, **options)
         ws = ReportTestCase._report(root=self._mk_root(), options=options)
         d0, d1 = self._check_header_and_footer(ws) # basic document structure test (nothing has been lost)

@@ -2,7 +2,8 @@ usage: estimate.py [-h] [--factor FACTOR] [--role-factors ROLE_FACTORS]
                    [--theme THEME] [--sort] [--p99] [--mvp]
                    [--no-data-validation] [--no-roles] [--formulas]
                    [--filter-visibility] [--arrows] [--stages] [--modules]
-                   [--corrections CORRECTIONS] [--unpivot-tree] [-o OUTPUT]
+                   [--corrections CORRECTIONS] [--separate-footer]
+                   [--unpivot-tree] [-o OUTPUT]
                    filename
 
 Converts freemind estimation to xlsx report.
@@ -35,6 +36,7 @@ optional arguments:
   --corrections CORRECTIONS
                         use extra corrections with default values (in format
                         f1:v1,f2:v2,f3:v3,...)
+  --separate-footer     move footer to a separate worksheet
   --unpivot-tree        show hierarchy columns (level by level) before the
                         table items (it turns off the header and features as
                         roles, formulas, ...)
