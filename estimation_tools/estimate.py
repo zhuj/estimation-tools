@@ -265,6 +265,7 @@ class Theme:
 
     # default boolean format
     DEFAULT_F_BOOLEAN = {
+        'num_format': '0'
     }
 
     # default number format
@@ -501,6 +502,7 @@ class Processor:
     OPT_MODULES = 'modules'
     OPT_CORRECTIONS = 'corrections'
     OPT_UNPIVOT_TREE = 'unpivot_tree'
+    OPT_SEPARATE_FOOTER = 'separate_footer'
 
     # regexps patterns
     import re
@@ -571,14 +573,17 @@ class Processor:
         self._arrows = getattr(options, Processor.OPT_ARROWS, False) and True
         self._corrections = Processor._parse_factors(getattr(options, Processor.OPT_CORRECTIONS, None))
         self._unpivot_tree = getattr(options, Processor.OPT_UNPIVOT_TREE, False) and True
+        self._separate_footer = getattr(options, Processor.OPT_SEPARATE_FOOTER, False) and True
 
         if (self._stages):
             self._mvp = False
 
         if (self._unpivot_tree):
+            self._separate_footer = True
             self._roles = False
             self._formulas = False
             self._filter_visibility = False
+            self._validation = False
 
     @staticmethod
     def _text(xmlNode):
@@ -831,6 +836,7 @@ class Processor:
         f_comment = self._theme.F_COMMENT
         f_estimates = self._theme.F_ESTIMATES
         f_percentage = self._theme.F_PERCENTAGE
+        f_boolean = self._theme.F_BOOLEAN
         f_role = self._theme.F_ROLE_ROW
         f_total = self._theme.F_TOTAL
         f_final = self._theme.F_FINAL
@@ -1033,7 +1039,7 @@ class Processor:
             # obtain estimations for the row (total, aggregated from the node and its roles)
             estimates = l.estimates()
 
-            # unpivot has to hide all axillary rows
+            # unpivot mode has to hide all axillary rows
             if (self._unpivot_tree):
                 if (estimates is None):
                     continue
@@ -1083,6 +1089,11 @@ class Processor:
                     E0.number(ws, row, estimates[0], f_role)              # E0.(ws, estimate)
                     E1.number(ws, row, estimates[1], f_role)              # E1.(ws, estimate)
                     E2.number(ws, row, estimates[2], f_role)              # E2.(ws, estimate)
+
+                if (self._stages):
+                    stage = _stage_to_string(l)
+                    if (not stage): stage = "(?)"
+                    B2.string(ws, row, stage, f_role) # B2.(ws, Stage, all rows)
 
                 continue
 
@@ -1155,13 +1166,6 @@ class Processor:
                 E5.formula(ws, row, '=(%s-%s)/6' % (cell(E2, row), cell(E0, row)), f_row, f_estimates)                      # E2.(ws, standard deviation)
                 E6.formula(ws, row, '=%s*%s' % (cell(E5, row), cell(E5, row)), f_row, f_estimates)                          # E3.(ws, squared deviation)
 
-        # ------------------------------------
-        # -- no footer if it's a pivot mode --
-
-        #if (self._unpivot_tree):
-        #    # no header, no formulas, no roles, no life, no fun....
-        #    return
-
         # -------------------------------------
         # change estimation numbers to formulas
         if (self._formulas):
@@ -1221,7 +1225,7 @@ class Processor:
         # start the footer
 
         ws_footer = ws_estimates
-        if (self._unpivot_tree):
+        if (self._separate_footer):
             ws_footer = ws = wb.create_sheet("Footer")
 
             # columns
@@ -1324,6 +1328,7 @@ class Processor:
             E4.formula(ws, row_footer, '=(%s+4*%s+%s)/6' % (cell(E0, row_footer), cell(E1, row_footer), cell(E2, row_footer)), f_total, f_estimates) # E4.(ws, local,total)
             if (total_cell):
                 E5.formula(ws, row_footer, '=(%s/%s)' % (cell(E4, row_footer), total_cell), f_total, f_percentage)         # E5.(ws, %)
+                R0.formula(ws, row_footer, '=IF(%s>0, 1, 0)' % (cell(E5, row_footer)), f_boolean)                          # R0
             if (sd):
                 E6.formula(ws, row_footer, '=SUMIFS(%s%s,%s)' % (prefix, cells(E6, row_lines), row_criteria), f_total, f_estimates)           # E6.(ws, sum,sd)
             return row_footer
@@ -1336,6 +1341,10 @@ class Processor:
 
         # total values for each role, if it's required
         if (self._roles):
+            # one extra line
+            row_footer += 1
+
+            # total (roles) values
             roles = list(roles)
             roles.sort()
             for role in roles:
@@ -1351,8 +1360,6 @@ class Processor:
                         ws_footer.title, cell(E4, row_total)
                     )
                 )
-            #del roles
-            #del role
 
         if (self._mvp):
             # one extra line
@@ -1370,7 +1377,6 @@ class Processor:
             )
 
         elif (self._stages):
-
             # one extra line
             row_footer += 1
 
@@ -1388,10 +1394,6 @@ class Processor:
                     ),
                     total_cell='%s!%s' % (ws_footer.title, cell(E4, row_total))
                 )
-            #del stages
-            #del stage
-
-            # TODO: filter: ws.auto_filter.add_filter_column((ord(B2)-ord('A')), stages, blank=True)
 
         if (self._modules):
 
@@ -1412,10 +1414,6 @@ class Processor:
                     ),
                     total_cell='%s!%s' % (ws_footer.title, cell(E4, row_total))
                 )
-            #del modules
-            #del module
-
-            # TODO: filter: ws.auto_filter.add_filter_column((ord(S0)-ord('A')), modules, blank=True)
 
         # one extra line
         row_footer += 1
@@ -1608,9 +1606,6 @@ class Processor:
 
                 for module in modules:
 
-                    #m_lines = [ l for l in s_lines if l.acquire_custom("module") == module ]
-                    #if (not m_lines): continue
-
                     row_footer += 1
                     row_footer = _partial(
                         row_footer=row_footer,
@@ -1637,6 +1632,115 @@ class Processor:
 
                 # yet another empty
                 row_footer += 1
+
+                # TODO: filter
+                # TODO: ws.auto_filter.ref = '%s:%s' % (cell(R0, 2), cell(R0, row_footer))
+                # TODO: ws.auto_filter.add_filter_column((ord(str(R0))-ord('A')), ['1'], blank=True)
+
+        # -----------------------
+        # Stages & Roles report
+        if (self._stages and self._roles and len(stages) > 1 and len(roles) > 1):
+
+            ws_matrix = ws = wb.create_sheet("StagesAndRoles")
+
+            # columns
+            B0.setup(ws, width=50, f=self._theme.F_DEFAULT)
+            C0.setup(ws, width=50, f=self._theme.F_COMMENT)
+            E0.setup(ws, width=8,  f=self._theme.F_NUMBERS)
+            E1.setup(ws, width=8,  f=self._theme.F_NUMBERS)
+            E2.setup(ws, width=8,  f=self._theme.F_NUMBERS)
+            E3.setup(ws, width=4,  f=self._theme.F_DEFAULT)
+            E4.setup(ws, width=8,  f=self._theme.F_NUMBERS)
+            E5.setup(ws, width=8,  f=self._theme.F_NUMBERS)
+            E6.setup(ws, width=8,  f=self._theme.F_NUMBERS)
+            R0.setup(ws, width=3,  f=self._theme.F_DEFAULT)
+
+            # hide pivot
+            for LI, LL in LEVELS:
+                LL.hide(ws, hidden=True)
+
+            # header: fixed columns
+            row = 0
+            B0.string(ws, row, '', f_header)                # B0: caption
+            B1.string(ws, row, '', f_header)                # B1: visibility
+            B2.string(ws, row, '', f_header)                # B2: empty/MVP/Stage
+            S0.string(ws, row, '', f_header)                # S0: structure (module, submodule, ....)
+            S1.string(ws, row, '', f_header)                # S1: structure
+            S2.string(ws, row, '', f_header)                # S2: structure
+            S3.string(ws, row, '', f_header)                # S3: structure
+            C0.string(ws, row, '', f_header)                # C0: comment
+            E0.string(ws, row, 'Min', f_header)             # E0: estimate
+            E1.string(ws, row, 'Real', f_header)            # E1: estimate
+            E2.string(ws, row, 'Max', f_header)             # E2: estimate
+            E3.string(ws, row, '', f_header)                # E3: empty
+            E4.string(ws, row, 'Avg', f_header)             # E4: weighted mean
+            E5.string(ws, row, '%', f_header)               # E5: standard deviation
+            E6.string(ws, row, 'Sq', f_header)              # E6: squared deviation
+
+            # hide visibility if required
+            B1.hide(ws, hidden=True)
+
+            # hide structure columns
+            S1.hide(ws, hidden=True)
+            S2.hide(ws, hidden=True)
+            S3.hide(ws, hidden=True)
+
+            # hide role column
+            R0.hide(ws, hidden=True)
+
+            # footer
+            row_footer = row+1
+
+            for stage in stages:
+
+                s_lines = [ l for l in lines if _stage_to_string(l) == stage ]
+                if (not s_lines): continue
+
+                row_footer += 1
+                row_stage = row_footer = _partial(
+                    row_footer=row_footer,
+                    caption='Stage %s' % stage,
+                    row_criteria='%s!%s,"=1",%s!%s,"%s"' % (
+                        ws_estimates.title, cells(B1, row_lines),
+                        ws_estimates.title, cells(B2, row_lines), stage
+                    ),
+                    total_cell='%s!%s' % (ws_footer.title, cell(E4, row_total)),
+                    f_total=f_final,
+                    sd=True
+                )
+
+                for role in roles:
+
+                    row_footer += 1
+                    row_footer = _partial(
+                        row_footer=row_footer,
+                        caption='  - %s' % role.strip('()'),
+                        row_criteria='%s!%s,"=0",%s!%s,"%s",%s!%s,"%s"' % (
+                            ws_estimates.title, cells(B1, row_lines),
+                            ws_estimates.title, cells(B2, row_lines), stage,
+                            ws_estimates.title, cells(R0, row_lines), role
+                        ),
+                        total_cell='%s!%s' % (ws_matrix.title, cell(E4, row_stage))
+                    )
+
+                # sigma: standard deviation
+                row_footer += 1
+                row_sigma = _sigma(row_footer, row_total=row_stage)
+
+                # Min (P=95/99%)
+                row_footer += 1
+                row_footer = _final(row_footer, row_total=row_stage, row_sigma=row_sigma, sign="-")
+
+                # Max (P=95/99%)
+                row_footer += 1
+                row_footer = _final(row_footer, row_total=row_stage, row_sigma=row_sigma, sign="+")
+
+                # yet another empty
+                row_footer += 1
+
+                # TODO: filter
+                # TODO: ws.auto_filter.ref = '%s:%s' % (cell(R0, 2), cell(R0, row_footer))
+                # TODO: ws.auto_filter.add_filter_column((ord(str(R0))-ord('A')), ['1'], blank=True)
 
 
         return row_lines
@@ -1759,6 +1863,13 @@ if __name__ == "__main__":
         action='store',
         dest=Processor.OPT_CORRECTIONS,
         help='''use extra corrections with default values (in format f1:v1,f2:v2,f3:v3,...)'''
+    )
+
+    parser.add_argument(
+        '--separate-footer',
+        action='store_true',
+        dest=Processor.OPT_SEPARATE_FOOTER,
+        help='''move footer to a separate worksheet'''
     )
 
     # experimental
