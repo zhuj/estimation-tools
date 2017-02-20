@@ -2,6 +2,7 @@ usage: estimate.py [-h] [--factor FACTOR] [--role-factors ROLE_FACTORS]
                    [--theme THEME] [--sort] [--p99] [--mvp]
                    [--no-data-validation] [--no-roles] [--formulas]
                    [--filter-visibility] [--arrows] [--stages] [--modules]
+                   [--hide-empty-structures] [--no-risks]
                    [--corrections CORRECTIONS] [--separate-footer]
                    [--unpivot-tree] [-o OUTPUT]
                    filename
@@ -33,6 +34,11 @@ optional arguments:
                         groups (replaces MVP feature)
   --modules             transformation: use modules markers as nodes/subtree
                         groups
+  --hide-empty-structures
+                        hide empty structure elements (stages, modules, ...)
+                        from the footer
+  --no-risks            completely remove risks section from the result
+                        document
   --corrections CORRECTIONS
                         use extra corrections with default values (in format
                         f1:v1,f2:v2,f3:v3,...)

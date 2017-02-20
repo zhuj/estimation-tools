@@ -285,6 +285,7 @@ class ReportTestCase(unittest.TestCase):
         options = dict({
             estimate.Processor.OPT_ROLES: True,
             estimate.Processor.OPT_VALIDATION: True,
+            estimate.Processor.OPT_RISKS: True,
             estimate.Processor.OPT_UNPIVOT_TREE: False,
             estimate.Processor.OPT_SEPARATE_FOOTER: False
         }, **options)

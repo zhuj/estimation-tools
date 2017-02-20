@@ -500,6 +500,8 @@ class Processor:
     OPT_ARROWS = 'arrows'
     OPT_STAGES = 'stages'
     OPT_MODULES = 'modules'
+    OPT_HIDE_EMPTY_STRUCTURES = "hide_empty_structures"
+    OPT_RISKS = "risks"
     OPT_CORRECTIONS = 'corrections'
     OPT_UNPIVOT_TREE = 'unpivot_tree'
     OPT_SEPARATE_FOOTER = 'separate_footer'
@@ -518,6 +520,8 @@ class Processor:
 
         'mvp-': ('mvp-', '*'),
         'api+': ('api+', '*'),
+        'risk': ('risk', '*'),
+
         'stage': ('stage', ''),
         'phase': ('stage', ''),
         'module': ('module', '')
@@ -547,7 +551,7 @@ class Processor:
 
     #
     @staticmethod
-    def _parse_factors(factors):
+    def _parse_role_factors(factors):
         if (factors):
             factors = factors.split(',')
             factors = [ x.split(':') for x in factors ]
@@ -556,10 +560,25 @@ class Processor:
         return None
 
     #
+    @staticmethod
+    def _parse_factors(factors):
+        if (factors):
+            factors = factors.split(',')
+            factors = [ float(f.strip()) for f in factors ]
+            while (len(factors) < 3):
+                factors.append(factors[-1])
+
+            if (factors == [1.0, 1.0, 1.0]):
+                return None
+
+            return factors
+        return None
+
+    #
     def __init__(self, options):
         options = Processor._wrap_options(options)
-        self._factor = float(getattr(options, Processor.OPT_FACTOR, None) or "1.0")
-        self._role_factors = Processor._parse_factors(getattr(options, Processor.OPT_ROLE_FACTORS, None))
+        self._factors = Processor._parse_factors(getattr(options, Processor.OPT_FACTOR, None))
+        self._role_factors = Processor._parse_role_factors(getattr(options, Processor.OPT_ROLE_FACTORS, None))
         self._theme = Processor._loadTheme(getattr(options, Processor.OPT_THEME, None))
         self._sorting = getattr(options, Processor.OPT_SORTING, False) and True
         self._validation = getattr(options, Processor.OPT_VALIDATION, False) and True
@@ -570,8 +589,10 @@ class Processor:
         self._filter_visibility = self._roles and (getattr(options, Processor.OPT_FILTER_VISIBILITY, False) and True)
         self._stages = getattr(options, Processor.OPT_STAGES, False) and True
         self._modules = getattr(options, Processor.OPT_MODULES, False) and True
+        self._hide_empty = getattr(options, Processor.OPT_HIDE_EMPTY_STRUCTURES, False) and True
+        self._risks = getattr(options, Processor.OPT_RISKS, False) and True
         self._arrows = getattr(options, Processor.OPT_ARROWS, False) and True
-        self._corrections = Processor._parse_factors(getattr(options, Processor.OPT_CORRECTIONS, None))
+        self._corrections = Processor._parse_role_factors(getattr(options, Processor.OPT_CORRECTIONS, None))
         self._unpivot_tree = getattr(options, Processor.OPT_UNPIVOT_TREE, False) and True
         self._separate_footer = getattr(options, Processor.OPT_SEPARATE_FOOTER, False) and True
 
@@ -591,6 +612,17 @@ class Processor:
         ###     return xmlNode.getAttribute('TEXT') # xmind style for attributes
         text = ( v for k, v in xmlNode._get_attributes().items() if k.upper() == 'TEXT' )
         return text.next()
+
+    #
+    @staticmethod
+    def _apply_factors(factors, estimates):
+        if (factors is None):
+            return estimates
+
+        estimates[0] = max(estimates[0]*factors[0], 0)
+        estimates[1] = max(estimates[1]*factors[1], estimates[0])
+        estimates[2] = max(estimates[2]*factors[2], estimates[1])
+        return estimates
 
 
     #
@@ -613,7 +645,9 @@ class Processor:
             # first look at the estimation pattern
             match = Processor.RE_ESTIMATE.match(title)
             if (match):
-                estimates = [ self._factor * float(match.group(x).strip()) for x in (1,2,3) ]
+                estimates = [ float(match.group(x).strip()) for x in (1,2,3) ]
+                if (self._factors is not None):
+                    estimates = Processor._apply_factors(self._factors, estimates)
 
                 if (parent.is_role()):
                     role = parent.title()
@@ -682,7 +716,7 @@ class Processor:
             _node_cache[path] = e
             return e
 
-        lines = Processor._collect(root)
+        lines = Processor._collect(tree)
         lines = [ ( l, s.strip() ) for l in lines for s in l.annotation('stage') ]
         lines = [ ( l, tuple([s.strip().lower().capitalize() for s in sl.split('.')]) ) for (l, sl) in lines if (s and not l.is_role()) ]
         # XXX: think about: lines.reverse() # not it's backward hierarchy sorted
@@ -711,6 +745,7 @@ class Processor:
 
             s.append(l.detach())
 
+        # clean up the result
         def _cleanup(node):
             if (node.is_role()): return node
             if (node.estimates() is not None): return node
@@ -723,14 +758,13 @@ class Processor:
 
             return None
 
-        tree = _cleanup(tree)
-        return tree
+        return _cleanup(tree)
 
     #
     def transform_modules(self, tree):
         """ it extracts modules (from annotations) and store them to nodes hierarchy  """
 
-        lines = Processor._collect(root)
+        lines = Processor._collect(tree)
         lines = [ ( l, s.strip() ) for l in lines for s in l.annotation('module') if (not l.is_role()) ]
         for l, s in lines:
             if (not s): continue
@@ -739,10 +773,40 @@ class Processor:
         return tree
 
     #
+    def transform_remove_risks(self, tree):
+        """ removes all risks from result estimates """
+
+        lines = Processor._collect(tree)
+        for l in lines:
+            if (l.is_role()): continue
+            if (("*" in l.annotation('risk')) or ("risks" in l.annotation('stage'))):
+                l.set_custom("risk", "1")
+
+        def _cleanup(node):
+
+            if (node.acquire_custom("risk") is not None):
+                if (node is not tree):
+                    return None
+
+            if (node.is_role()): return node
+            if (node.estimates() is not None): return node
+
+            childs = [ _cleanup(c) for c in node._childs ]
+            childs = [ c for c in childs if c is not None ]
+            if (len(childs) > 0):
+                node._childs = childs
+                return node
+
+            return None
+
+        return _cleanup(tree)
+
+    #
     def transform(self, tree):
         """ it applies transformations to the tree just before its reporting """
         if (self._modules): tree = self.transform_modules(tree)
         if (self._stages): tree = self.transform_stages(tree)
+        if (not self._risks): tree = self.transform_remove_risks(tree)
         return tree
 
     #
@@ -1012,14 +1076,20 @@ class Processor:
             )
             dv_mvp_empty.hide_drop_down = True
 
-        # ------
-        # stages
+        # ----------------
+        # stages & modules
 
         def _stage_to_string(node):
             if (self._stages):
                 stage = node.acquire_custom('stage')
                 if (stage):
                     return '.'.join(str(x) for x in stage)
+            return ''
+
+        def _module_to_string(node):
+            if (self._modules):
+                module = node.acquire_custom('module')
+                if (module): return module
             return ''
 
         # ------------------------
@@ -1138,8 +1208,7 @@ class Processor:
 
             # modules
             if (self._modules):
-                module = l.acquire_custom('module')
-                if (not module): module = ""
+                module = _module_to_string(l)
                 modules.add(module)
                 f_row_x = f_row if (estimates is not None) else f_role
                 S0.string(ws, row, module, f_row_x) # B2.(ws, Stage, all rows)
@@ -1384,6 +1453,7 @@ class Processor:
             stages = list(stages)
             stages.sort()
             for stage in stages:
+
                 row_footer += 1
                 row_footer = _partial(
                     row_footer=row_footer,
@@ -1394,6 +1464,11 @@ class Processor:
                     ),
                     total_cell='%s!%s' % (ws_footer.title, cell(E4, row_total))
                 )
+                
+                if (self._hide_empty):
+                    s_lines = [ l for l in lines if _stage_to_string(l) == stage if l.estimates() is not None ]
+                    if (not s_lines): _hide_row(ws, row_footer, hidden=True)
+
 
         if (self._modules):
 
@@ -1414,6 +1489,10 @@ class Processor:
                     ),
                     total_cell='%s!%s' % (ws_footer.title, cell(E4, row_total))
                 )
+
+                if (self._hide_empty):
+                    m_lines = [ l for l in lines if _module_to_string(l) == module if l.estimates() is not None ]
+                    if (not m_lines): _hide_row(ws, row_footer, hidden=True)
 
         # one extra line
         row_footer += 1
@@ -1589,7 +1668,8 @@ class Processor:
             for stage in stages:
 
                 s_lines = [ l for l in lines if _stage_to_string(l) == stage ]
-                if (not s_lines): continue
+                if (self._hide_empty):
+                    if (not s_lines): continue
 
                 row_footer += 1
                 row_stage = row_footer = _partial(
@@ -1618,7 +1698,14 @@ class Processor:
                         total_cell='%s!%s' % (ws_matrix.title, cell(E4, row_stage))
                     )
 
-                # sigma: standard deviation
+                    if (self._hide_empty):
+                        if (not s_lines): _hide_row(ws, row_footer, hidden=True)
+                        else:
+                            m_lines = [ l for l in s_lines if _module_to_string(l) == module if l.estimates() is not None ]
+                            if (not m_lines): _hide_row(ws, row_footer, hidden=True)
+
+
+            # sigma: standard deviation
                 row_footer += 1
                 row_sigma = _sigma(row_footer, row_total=row_stage)
 
@@ -1694,7 +1781,8 @@ class Processor:
             for stage in stages:
 
                 s_lines = [ l for l in lines if _stage_to_string(l) == stage ]
-                if (not s_lines): continue
+                if (self._hide_empty):
+                    if (not s_lines): continue
 
                 row_footer += 1
                 row_stage = row_footer = _partial(
@@ -1722,6 +1810,12 @@ class Processor:
                         ),
                         total_cell='%s!%s' % (ws_matrix.title, cell(E4, row_stage))
                     )
+
+                    if (self._hide_empty):
+                        if (not s_lines): _hide_row(ws, row_footer, hidden=True)
+                        else:
+                            r_lines = [ l for l in s_lines if l.is_role() and l.title() == role if l.estimates() is not None ]
+                            if (not r_lines): _hide_row(ws, row_footer, hidden=True)
 
                 # sigma: standard deviation
                 row_footer += 1
@@ -1755,8 +1849,8 @@ class Processor:
         return wb
 
 
-# let's dance
-if __name__ == "__main__":
+# main function
+def main():
 
     import argparse
 
@@ -1859,6 +1953,20 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        '--hide-empty-structures',
+        action='store_true',
+        dest=Processor.OPT_HIDE_EMPTY_STRUCTURES,
+        help='''hide empty structure elements (stages, modules, ...) from the footer'''
+    )
+
+    parser.add_argument(
+        '--no-risks',
+        action='store_false',
+        dest=Processor.OPT_RISKS,
+        help='''completely remove risks section from the result document'''
+    )
+
+    parser.add_argument(
         '--corrections',
         action='store',
         dest=Processor.OPT_CORRECTIONS,
@@ -1900,3 +2008,7 @@ if __name__ == "__main__":
     root = processor.transform(root)
     processor.report(root, options.output or (filename + ".xlsx"))
 
+
+# let's dance
+if __name__ == "__main__":
+    main()
