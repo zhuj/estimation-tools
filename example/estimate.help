@@ -1,4 +1,4 @@
-usage: estimate.py [-h] [--factor FACTOR] [--role-factors ROLE_FACTORS]
+usage: estimate.py [-h] [--factor MAIN_FACTOR] [--role-factors ROLE_FACTORS]
                    [--theme THEME] [--sort] [--p99] [--mvp]
                    [--no-data-validation] [--no-roles] [--formulas]
                    [--filter-visibility] [--arrows] [--stages] [--modules]
@@ -14,10 +14,11 @@ positional arguments:
 
 optional arguments:
   -h, --help            show this help message and exit
-  --factor FACTOR       use a given factor for estimates (default = 1.0)
+  --factor MAIN_FACTOR  use a given factor for estimates (default = 1.0, it's
+                        possible to use O/R/P format)
   --role-factors ROLE_FACTORS
                         use a given factors for roles (in format
-                        role1:v1,role2:v2,role3:v3,...)
+                        role1:f1,role2:f2,role3:f3,...)
   --theme THEME         use a given .py file as a theme
   --sort, -s            sort children nodes by title
   --p99                 use P=99% instead of P=95%
