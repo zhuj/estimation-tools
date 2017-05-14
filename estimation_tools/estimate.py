@@ -34,6 +34,7 @@ try:
 except:
     pass
 
+
 # estimatuion (contains set of numbers)
 class Estimation:
     """Estimation is a set of numbers (min <= real <= max) which describes a range for time requirement."""
@@ -67,6 +68,7 @@ class Estimation:
             self._numbers[i] + numbers[i]
             for i in xrange(3)
         ))
+
 
 # node (representation of mindmap xml node with additional properties)
 class Node:
@@ -180,12 +182,13 @@ class Node:
     def fill_from(self, node):
         import copy
         self._annotations = copy.copy(node._annotations)
-        #for k,v in vars(node).items():
-        #    if (k.startswith('_custom_')):
-        #        setattr(self, k, copy.copy(v))
+        self._estimations = copy.copy(node._estimations)
+        self._estimates_cache = Node._estimates(self._estimations)
 
-    def set_custom(self, name, value):
+    def set_custom(self, name, value, check=True):
+        v = getattr(self, '_custom_' + name, None)
         setattr(self, '_custom_' + name, value)
+        return v
 
     def acquire_custom(self, name):
         v = getattr(self, '_custom_' + name, None)
@@ -199,6 +202,7 @@ import colorsys
 def _hls(h, l, s):
     r, g, b = ( int(0xff * i) for i in colorsys.hls_to_rgb(h, l, s) )
     return "#%02X%02X%02X" % (r, g, b)
+
 
 # default theme (theme wrapper)
 class Theme:
@@ -367,6 +371,7 @@ class Theme:
         """public method for formats: it extends default format with the given one"""
         return self._merge_format(self.F_DEFAULT, opts)
 
+
 # format cache
 class FormatCache:
     """It wraps current theme and call format registration only for completely new format combination"""
@@ -400,10 +405,12 @@ class FormatCache:
 
         return val
 
+
 # openpyxl imports
 import openpyxl
 from openpyxl.utils.cell import get_column_letter
 from openpyxl.utils.cell import column_index_from_string
+
 
 # column wrapper
 class ColumnWrapper:
@@ -484,12 +491,14 @@ class ColumnWrapper:
             )
             i += 1
 
+
 # processor helper
 class Processor:
     """Helper class which does all transformation work"""
 
     # options
-    OPT_MAIN_FACTORS = 'main_factor'
+    OPT_MAIN_FACTORS = 'main_factors'
+    OPT_MAIN_FACTORS_VARIANT = 'main_factors_variant'
     OPT_ROLE_FACTORS = 'role_factors'
     OPT_THEME = 'theme'
     OPT_SORTING = 'sorting'
@@ -500,6 +509,8 @@ class Processor:
     OPT_FORMULAS = 'formulas'
     OPT_FILTER_VISIBILITY = 'filter_visibility'
     OPT_ARROWS = 'arrows'
+    OPT_VOLUMES = 'volumes'
+    OPT_VOLUMES_MUL = 'volumes_multiplier'
     OPT_STAGES = 'stages'
     OPT_MODULES = 'modules'
     OPT_HIDE_EMPTY_STRUCTURES = "hide_empty_structures"
@@ -580,6 +591,7 @@ class Processor:
     def __init__(self, options):
         options = Processor._wrap_options(options)
         self._main_factors = Processor._parse_main_factors(getattr(options, Processor.OPT_MAIN_FACTORS, None))
+        self._main_factors_variant = (getattr(options, Processor.OPT_MAIN_FACTORS_VARIANT, "") or "").lower()
         self._role_factors = Processor._parse_role_factors(getattr(options, Processor.OPT_ROLE_FACTORS, None))
         self._theme = Processor._loadTheme(getattr(options, Processor.OPT_THEME, None))
         self._sorting = getattr(options, Processor.OPT_SORTING, False) and True
@@ -594,6 +606,8 @@ class Processor:
         self._hide_empty = getattr(options, Processor.OPT_HIDE_EMPTY_STRUCTURES, False) and True
         self._risks = getattr(options, Processor.OPT_RISKS, False) and True
         self._arrows = getattr(options, Processor.OPT_ARROWS, False) and True
+        self._volumes = getattr(options, Processor.OPT_VOLUMES, False) and True
+        self._volumes_mul = self._volumes and float(getattr(options, Processor.OPT_VOLUMES_MUL, "0.0"))
         self._corrections = Processor._parse_role_factors(getattr(options, Processor.OPT_CORRECTIONS, None))
         self._unpivot_tree = getattr(options, Processor.OPT_UNPIVOT_TREE, False) and True
         self._separate_footer = getattr(options, Processor.OPT_SEPARATE_FOOTER, False) and True
@@ -615,20 +629,29 @@ class Processor:
 
     #
     @staticmethod
-    def _apply_factors(factors, estimates):
+    def _apply_factors(factors, estimates, variant='center'):
         if (factors is None):
             return estimates
 
-        # option 1 (from-left-to-right)
-        estimates[0] = max(estimates[0]*factors[0], 0)
-        estimates[1] = max(estimates[1]*factors[1], estimates[0])
-        estimates[2] = max(estimates[2]*factors[2], estimates[1])
+        if (variant in ('middle', 'center', '')):
+            # option (from-center-to-sides)
+            estimates[1] = estimates[1]*factors[1]
+            estimates[0] = min(estimates[0]*factors[0], estimates[1])
+            estimates[2] = max(estimates[2]*factors[2], estimates[1])
+        elif (variant == 'right'):
+            # option (from-right-to-left)
+            estimates[2] = max(estimates[2]*factors[2], 0)
+            estimates[1] = min(estimates[1]*factors[1], estimates[2])
+            estimates[0] = min(estimates[0]*factors[0], estimates[1])
+        elif (variant == 'left'):
+            # option (from-left-to-right)
+            estimates[0] = max(estimates[0]*factors[0], 0)
+            estimates[1] = max(estimates[1]*factors[1], estimates[0])
+            estimates[2] = max(estimates[2]*factors[2], estimates[1])
+        else:
+            raise "Undefined apply factor variant: %s" % variant
 
-        # TODO: make an option
-        # option 2 (from-the-middle)
-        # estimates[1] = estimates[1]*factors[1]
-        # estimates[0] = min(estimates[0]*factors[0], estimates[1])
-        # estimates[2] = max(estimates[2]*factors[2], estimates[1])
+
         return estimates
 
 
@@ -654,7 +677,7 @@ class Processor:
             if (match):
                 estimates = [ float(match.group(x).strip()) for x in (1,2,3) ]
                 if (self._main_factors is not None):
-                    estimates = Processor._apply_factors(self._main_factors, estimates)
+                    estimates = Processor._apply_factors(self._main_factors, estimates, self._main_factors_variant)
 
                 if (parent.is_role()):
                     role = parent.title()
@@ -672,7 +695,7 @@ class Processor:
                 required = 1
                 continue
 
-            # then, try to parse the node as a comment
+            # then, try to parse the node as an annotation
             for title_line in title.split('\n'):
                 match = Processor.RE_ANNOTATION.match(title_line)
                 if (match):
@@ -682,6 +705,15 @@ class Processor:
                         k, p = prefix
                         parent.annotation(k, p + text)
                         required = 1
+
+            # then try to parse volumes (regardless the parameter value)
+            if (title and (title.startswith('[[') and title.endswith(']]'))):
+                title = title[2:-2]
+                prev = parent.set_custom("volume", float(title))
+                if (prev is not None): raise Exception(parent, title)
+                parent._title += ", %s" % title
+                required = (self._process(parent, xmlNode.childNodes) is not None) or required
+                continue
 
             # else handle it as a regular node
             node = Node(parent, title)
@@ -968,6 +1000,9 @@ class Processor:
 
         R0 = _columns.next()                                         # P: role name
 
+        V0 = _columns.next()                                         # V: volumes (volume)
+        V1 = _columns.next()                                         # V: volumes (complexity)
+
         del _columns
 
         # -------------
@@ -993,6 +1028,8 @@ class Processor:
         E5.setup(ws, width=8,  f=self._theme.F_NUMBERS)
         E6.setup(ws, width=8,  f=self._theme.F_NUMBERS)
         R0.setup(ws, width=3,  f=self._theme.F_DEFAULT)
+        V0.setup(ws, width=8, f=self._theme.F_NUMBERS)
+        V1.setup(ws, width=8, f=self._theme.F_NUMBERS)
 
         # hide visibility if required
         if (not self._filter_visibility):
@@ -1009,6 +1046,15 @@ class Processor:
 
         # hide role column
         R0.hide(ws, hidden=True)
+
+        # volumes
+        if (self._volumes):
+            V0.number(ws, 0, self._main_factors[1] if self._main_factors is not None else 1.0)
+            V1.number(ws, 0, max(0.0, self._volumes_mul))
+        else:
+            V0.hide(ws, hidden=True)
+            V1.hide(ws, hidden=True)
+
 
         # start rows
         row = 0
@@ -1241,6 +1287,11 @@ class Processor:
                 E4.formula(ws, row, '=(%s+4*%s+%s)/6' % (cell(E0, row), cell(E1, row), cell(E2, row)), f_row, f_estimates)  # E1 (weighted mean)
                 E5.formula(ws, row, '=(%s-%s)/6' % (cell(E2, row), cell(E0, row)), f_row, f_estimates)                      # E2 (standard deviation)
                 E6.formula(ws, row, '=%s*%s' % (cell(E5, row), cell(E5, row)), f_row, f_estimates)                          # E3 (squared deviation)
+
+                if (self._volumes):
+                    volume = l.acquire_custom('volume')
+                    if (volume):
+                        V0.formula(ws, row, '=max(%s, %s*%s*%s)' % (cell(V0, 0), cell(E4, row), float(volume), cell(V1, 0)), f_row)
 
         # -------------------------------------
         # change estimation numbers to formulas
@@ -1860,9 +1911,9 @@ class Processor:
         return wb
 
 
-# main function
-def main():
-
+# let's dance
+if __name__ == "__main__":
+  def main():
     import argparse
 
     parser = argparse.ArgumentParser(
@@ -1874,6 +1925,13 @@ def main():
         action='store',
         dest=Processor.OPT_MAIN_FACTORS,
         help='''use a given factor for estimates (default = 1.0, it's possible to use O/R/P format)'''
+    )
+
+    parser.add_argument(
+        '--factor-variant',
+        action='store',
+        dest=Processor.OPT_MAIN_FACTORS_VARIANT,
+        help='''specify behaviour of O/R/P factor format'''
     )
 
     parser.add_argument(
@@ -1999,6 +2057,22 @@ def main():
         help='''show hierarchy columns (level by level) before the table items (it turns off the header and features as roles, formulas, ...)'''
     )
 
+    # experimental
+    parser.add_argument(
+        '--volumes',
+        action='store_true',
+        dest=Processor.OPT_VOLUMES,
+        help='''transformation: use volumes markers as node/subtree weights'''
+    )
+
+    # experimental
+    parser.add_argument(
+        '--volumes-multiplier',
+        action='store',
+        dest=Processor.OPT_VOLUMES_MUL,
+        help='''transformation: use volumes markers as node/subtree weights (global multiplier, default=0.0)'''
+    )
+
     parser.add_argument(
         '-o',
         action='store',
@@ -2019,7 +2093,4 @@ def main():
     root = processor.transform(root)
     processor.report(root, options.output or (filename + ".xlsx"))
 
-
-# let's dance
-if __name__ == "__main__":
-    main()
+  main()
