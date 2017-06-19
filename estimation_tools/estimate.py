@@ -125,9 +125,13 @@ class Node:
         if (self._parent is None): return self
         return self._parent.parent(level)
 
-    def append(self, node):
+    def append(self, node, before=None):
         node.__set_parent(self)
-        self._childs.append(node)
+        if (before is not None):
+            before = self._childs.index(before)
+            self._childs.insert(before, node)
+        else:
+            self._childs.append(node)
         return node
 
     def detach(self):
@@ -145,6 +149,8 @@ class Node:
         if value:
             l.append(value)
             self._annotations[name] = l
+            return l
+        return None
 
     def mvp_minus(self):
         return len(self.annotation('mvp-')) > 0
@@ -190,8 +196,11 @@ class Node:
         setattr(self, '_custom_' + name, value)
         return v
 
+    def get_custom(self, name):
+        return getattr(self, '_custom_' + name, None)
+
     def acquire_custom(self, name):
-        v = getattr(self, '_custom_' + name, None)
+        v = self.get_custom(name)
         if (v is not None): return v
         if (self._parent is not None): return self._parent.acquire_custom(name)
         return None
@@ -504,6 +513,7 @@ class Processor:
     OPT_SORTING = 'sorting'
     OPT_P_99 = 'p99'
     OPT_MVP = 'mvp'
+    OPT_IDS = 'ids'
     OPT_ROLES = 'roles'
     OPT_VALIDATION = 'validation'
     OPT_FORMULAS = 'formulas'
@@ -597,6 +607,7 @@ class Processor:
         self._sorting = getattr(options, Processor.OPT_SORTING, False) and True
         self._validation = getattr(options, Processor.OPT_VALIDATION, False) and True
         self._mvp = getattr(options, Processor.OPT_MVP, False) and True
+        self._ids = getattr(options, Processor.OPT_IDS, False) and True
         self._p99 = getattr(options, Processor.OPT_P_99, False) and True
         self._roles = getattr(options, Processor.OPT_ROLES, False) and True
         self._formulas = self._roles and (getattr(options, Processor.OPT_FORMULAS, False) and True)
@@ -764,6 +775,14 @@ class Processor:
     def transform_stages(self, tree):
         """ it extracts stages (from annotations) and rearrange nodes according their stages """
 
+        # setup default "Stage 0"
+
+        lines = [ l for l in tree.childs() if l.annotation('stage') is None ]
+        for l in lines: l.annotaion('stage', '0')
+        del lines
+
+        # let's get started
+
         _node_cache = {}
         def _add_node(path, caption=lambda x:x[-1]):
             if (not path): return tree
@@ -779,20 +798,23 @@ class Processor:
         lines = Processor._collect(tree)
         lines = [ l for l in lines if (not l.is_role()) ]
 
+        # collect data by annotation and by nodes together
         lines = (
-            [ ( l, s.strip() ) for l in lines for s in l.annotation('stage') ] +
+            [ ( l, s.strip() ) for l in lines for s in l.annotation('stage') ] + 
             [ ( l, l.title().replace('Stage ', '', 1).strip() ) for l in lines if (l.estimates() is None) and (l.title().startswith('Stage ')) ]
         )
 
         lines = [ ( l, (sl, ) ) for (l, sl) in lines if (sl) ]
 
-        # TODO: think about: lines.reverse() # make it backward hierarchy sorted
+        # TODO: think about: lines.reverse() 
+        # TODO: make it backward hierarchy sorted
 
         # append stages first in a right order
-        stages = list(set([ sl for (l, sl) in lines ]))
+        stages = [ sl for (l, sl) in lines ]
+        stages = list(set( stages ))
         stages.sort()
         for sl in stages:
-            s = _add_node(sl, caption=lambda x:'Stage %s' % '.'.join(x))
+            s = _add_node(path=sl, caption=lambda x:'Stage %s' % '.'.join(x))
             s.set_custom("stage", sl)
         del stages
 
@@ -811,6 +833,9 @@ class Processor:
                 s.set_custom("module", t.acquire_custom("module")) # fix bug # TODO: make it more clear
 
             s.append(l.detach())
+
+            sl = sl + (l.title(), )
+            _node_cache[sl] = l
 
         # clean up the result and return it
         return Processor._cleanup_tree(
@@ -831,6 +856,35 @@ class Processor:
         return tree
 
     #
+    def transform_ids(self, tree):
+        """ remove all ids nodes, move them to annotations """
+
+        def is_id(node):
+            title = node.title()
+            return (title) and ((title[0] == '{') and (title[-1] == '}')) or False
+
+        def _traverse(node):
+
+            # prepare each child
+            for c in [ c for c in node.childs() ]:
+                _traverse(c)
+
+            # collapse child if it's required
+            if (is_id(node)):
+                ids = node.title().strip("{}")
+                for c in [ c for c in node.childs() ]:
+                    c.set_custom("ids", ids)
+                    node.parent().append(c.detach(), before=node)
+
+        _traverse(tree)
+
+        # clean up the result and return it
+        return Processor._cleanup_tree(
+            node=tree,
+            transformer=lambda n: None if is_id(n) else n
+        )
+
+    #
     def transform_remove_risks(self, tree):
         """ removes all risks from result estimates """
 
@@ -842,6 +896,7 @@ class Processor:
     #
     def transform(self, tree):
         """ it applies transformations to the tree just before its reporting """
+        if (self._ids): tree = self.transform_ids(tree)
         if (self._modules): tree = self.transform_modules(tree)
         if (self._stages): tree = self.transform_stages(tree)
         if (not self._risks): tree = self.transform_remove_risks(tree)
@@ -979,6 +1034,7 @@ class Processor:
 
             LEVELS = [ (l, _columns.next()) for l in range(max_level) ]
 
+        BI = _columns.next() if (self._ids) else NOCL                # ?: id
         B0 = _columns.next()                                         # A: caption
         B1 = _columns.next()                                         # B: visibility
         B2 = _columns.next()                                         # C: empty/MVP/Stage
@@ -1012,6 +1068,7 @@ class Processor:
             LL.setup(ws, width=20, f=self._theme.F_DEFAULT)
 
         # setup columns: base columns
+        BI.setup(ws, width=10, f=self._theme.F_DEFAULT)
         B0.setup(ws, width=50, f=self._theme.F_DEFAULT)
         B1.setup(ws, width=3,  f=self._theme.F_MULTIPLIER)
         B2.setup(ws, width=8,  f=self._theme.F_COMMENT)
@@ -1028,8 +1085,8 @@ class Processor:
         E5.setup(ws, width=8,  f=self._theme.F_NUMBERS)
         E6.setup(ws, width=8,  f=self._theme.F_NUMBERS)
         R0.setup(ws, width=3,  f=self._theme.F_DEFAULT)
-        V0.setup(ws, width=8, f=self._theme.F_NUMBERS)
-        V1.setup(ws, width=8, f=self._theme.F_NUMBERS)
+        V0.setup(ws, width=8,  f=self._theme.F_NUMBERS)
+        V1.setup(ws, width=8,  f=self._theme.F_NUMBERS)
 
         # hide visibility if required
         if (not self._filter_visibility):
@@ -1068,6 +1125,7 @@ class Processor:
             LL.string(ws, row, 'Level %s' % (1 + LI), f_header) # LL: level
 
         # header: fixed columns
+        BI.string(ws, row, 'IDs', f_header)             # BI: IDs
         B0.string(ws, row, 'Task / Subtask', f_header)  # B0: caption
         B1.string(ws, row, 'Filter', f_header)          # B1: visibility
         B2.string(ws, row, '', f_header)                # B2: empty/MVP/Stage
@@ -1238,6 +1296,8 @@ class Processor:
             multiplier = (not role) and (estimates is not None)
 
             # let's fill the row with data
+            ids = l.acquire_custom('ids') if (self._unpivot_tree) else l.get_custom('ids')
+            BI.string(ws, row, ids, f_row, f_comment)                                  # BI (IDs)
             B0.string(ws, row, l.title_with_level(), f_row)                            # B0 (title)
             B1.blank(ws, row, f_row, f_multiplier)                                     # B1 (visibility/multiplier)
             B2.blank(ws, row, f_row)                                                   # B2 (empty/MVP/Stage)
@@ -1390,6 +1450,7 @@ class Processor:
             R0.string(ws, row, '', f_header)                # R0: role name
 
             # hide visibility if required
+            BI.hide(ws, hidden=True)
             B1.hide(ws, hidden=True)
 
             # hide structure columns
@@ -1521,7 +1582,7 @@ class Processor:
                     ),
                     total_cell='%s!%s' % (ws_footer.title, cell(E4, row_total))
                 )
-                
+
                 if (self._hide_empty):
                     s_lines = [ l for l in lines if _stage_to_string(l) == stage if l.estimates() is not None ]
                     if (not s_lines): _hide_row(ws, row_footer, hidden=True)
@@ -1710,6 +1771,7 @@ class Processor:
             E6.string(ws, row, 'Sq', f_header)              # E6: squared deviation
 
             # hide visibility if required
+            BI.hide(ws, hidden=True)
             B1.hide(ws, hidden=True)
 
             # hide structure columns
@@ -1825,6 +1887,7 @@ class Processor:
             E6.string(ws, row, 'Sq', f_header)              # E6: squared deviation
 
             # hide visibility if required
+            BI.hide(ws, hidden=True)
             B1.hide(ws, hidden=True)
 
             # hide structure columns
@@ -1967,6 +2030,13 @@ if __name__ == "__main__":
         action='store_true',
         dest=Processor.OPT_MVP,
         help='''add Minimum Viable Product (MVP) features'''
+    )
+
+    parser.add_argument(
+        '--ids',
+        action='store_true',
+        dest=Processor.OPT_IDS,
+        help='''add IDs column'''
     )
 
     # this option is required for SharePoint

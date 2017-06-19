@@ -1,10 +1,12 @@
-usage: estimate.py [-h] [--factor MAIN_FACTOR] [--role-factors ROLE_FACTORS]
-                   [--theme THEME] [--sort] [--p99] [--mvp]
-                   [--no-data-validation] [--no-roles] [--formulas]
-                   [--filter-visibility] [--arrows] [--stages] [--modules]
-                   [--hide-empty-structures] [--no-risks]
+usage: estimate.py [-h] [--factor MAIN_FACTORS]
+                   [--factor-variant MAIN_FACTORS_VARIANT]
+                   [--role-factors ROLE_FACTORS] [--theme THEME] [--sort]
+                   [--p99] [--mvp] [--ids] [--no-data-validation] [--no-roles]
+                   [--formulas] [--filter-visibility] [--arrows] [--stages]
+                   [--modules] [--hide-empty-structures] [--no-risks]
                    [--corrections CORRECTIONS] [--separate-footer]
-                   [--unpivot-tree] [-o OUTPUT]
+                   [--unpivot-tree] [--volumes]
+                   [--volumes-multiplier VOLUMES_MULTIPLIER] [-o OUTPUT]
                    filename
 
 Converts freemind estimation to xlsx report.
@@ -14,8 +16,11 @@ positional arguments:
 
 optional arguments:
   -h, --help            show this help message and exit
-  --factor MAIN_FACTOR  use a given factor for estimates (default = 1.0, it's
+  --factor MAIN_FACTORS
+                        use a given factor for estimates (default = 1.0, it's
                         possible to use O/R/P format)
+  --factor-variant MAIN_FACTORS_VARIANT
+                        specify behaviour of O/R/P factor format
   --role-factors ROLE_FACTORS
                         use a given factors for roles (in format
                         role1:f1,role2:f2,role3:f3,...)
@@ -23,6 +28,7 @@ optional arguments:
   --sort, -s            sort children nodes by title
   --p99                 use P=99% instead of P=95%
   --mvp                 add Minimum Viable Product (MVP) features
+  --ids                 add IDs column
   --no-data-validation  don't apply data validation for filter and MVP column
                         (SharePoint fix)
   --no-roles            don't provide estimation details for each role
@@ -47,4 +53,9 @@ optional arguments:
   --unpivot-tree        show hierarchy columns (level by level) before the
                         table items (it turns off the header and features as
                         roles, formulas, ...)
+  --volumes             transformation: use volumes markers as node/subtree
+                        weights
+  --volumes-multiplier VOLUMES_MULTIPLIER
+                        transformation: use volumes markers as node/subtree
+                        weights (global multiplier, default=0.0)
   -o OUTPUT             out file name
