@@ -178,7 +178,7 @@ class Node:
 
         return reduce(lambda x,y: x+y, estimations)
 
-    def trace(self, stoppers):
+    def trace(self, stoppers=[]):
         if (self in stoppers): return [ ]
         if (self._parent is None): return [ self ]
         trace = self._parent.trace(stoppers)
@@ -633,10 +633,15 @@ class Processor:
             self._filter_visibility = False
             self._validation = False
 
+
+    @staticmethod
+    def _attribute(xmlNode, upperName):
+        text = ( v for k, v in xmlNode._get_attributes().items() if k.upper() == upperName )
+        return text.next()
+
     @staticmethod
     def _text(xmlNode):
-        text = ( v for k, v in xmlNode._get_attributes().items() if k.upper() == 'TEXT' )
-        return text.next()
+        return Processor._attribute(xmlNode, 'TEXT')
 
     #
     @staticmethod
@@ -667,10 +672,20 @@ class Processor:
 
 
     #
-    def _process(self, parent, xmlNodes):
+    def _process(self, parent, xmlNodes, node_modifier=lambda node: node):
         required = 0
 
         xmlNodes = [ n for n in xmlNodes if n.nodeType == n.ELEMENT_NODE ]
+
+        # process edges first
+        if (self._arrows):
+            xmlEdges = [ n for n in xmlNodes if n.tagName == 'arrowlink' ]
+            for xmlEdge in xmlEdges:
+                target = Processor._attribute(xmlEdge, 'DESTINATION')
+                if (target):
+                    parent.annotation("dependency_ids", target)
+            del xmlEdges
+
         xmlNodes = [ n for n in xmlNodes if n.tagName == 'node' ]
 
         # sort by title
@@ -682,6 +697,7 @@ class Processor:
         # start working with nodes
         for xmlNode in xmlNodes:
             title = Processor._text(xmlNode)
+            node_id = Processor._attribute(xmlNode, 'ID')
 
             # first look at the estimation pattern
             match = Processor.RE_ESTIMATE.match(title)
@@ -703,6 +719,7 @@ class Processor:
                     parent.parent().estimate(role, estimates)
 
                 parent.estimate(None, estimates) # (always) set the estimation for node itself
+                parent.annotation("node_ids", node_id)
                 required = 1
                 continue
 
@@ -717,19 +734,39 @@ class Processor:
                         parent.annotation(k, p + text)
                         required = 1
 
+            # then try to parse ids (regardless the parameter value)
+            if (title and (title.startswith('{') and title.endswith('}'))):
+                title = title[1:-1]
+                def modifier(child, ids=title):
+                    prev = child.set_custom("ids", ids)
+                    if (prev is not None): raise Exception(parent, ids)
+                    return child
+
+                if (self._process(parent, xmlNode.childNodes, node_modifier=modifier) is not None):
+                    parent.annotation("node_ids", node_id)
+                    required = 1
+
+                continue
+
             # then try to parse volumes (regardless the parameter value)
             if (title and (title.startswith('[[') and title.endswith(']]'))):
                 title = title[2:-2]
                 prev = parent.set_custom("volume", float(title))
                 if (prev is not None): raise Exception(parent, title)
                 parent._title += ", %s" % title
-                required = (self._process(parent, xmlNode.childNodes) is not None) or required
+
+                if (self._process(parent, xmlNode.childNodes) is not None):
+                    parent.annotation("node_ids", node_id)
+                    required = 1
+
                 continue
 
             # else handle it as a regular node
             node = Node(parent, title)
             node = self._process(node, xmlNode.childNodes)
             if (node is not None):
+                node = node_modifier(node)
+                node.annotation("node_ids", node_id)
                 parent.append(node)
                 required = 1
 
@@ -856,33 +893,24 @@ class Processor:
         return tree
 
     #
-    def transform_ids(self, tree):
-        """ remove all ids nodes, move them to annotations """
+    def transform_arrows(self, tree):
+        """ it extracts dependencies from arrows """
 
-        def is_id(node):
-            title = node.title()
-            return (title) and ((title[0] == '{') and (title[-1] == '}')) or False
+        from collections import defaultdict
+        id_to_node = defaultdict(list)
 
-        def _traverse(node):
+        lines = Processor._collect(tree)
+        for line in lines:
+            for id in line.annotation("node_ids"):
+                id_to_node[id].append(line)
 
-            # prepare each child
-            for c in [ c for c in node.childs() ]:
-                _traverse(c)
+        for line in lines:
+            for id in line.annotation("dependency_ids"):
+                for dep in id_to_node[id]:
+                    line.annotation( "comment", "Requires: " + " / ".join(n.title() for n in dep.trace([tree])) )
 
-            # collapse child if it's required
-            if (is_id(node)):
-                ids = node.title().strip("{}")
-                for c in [ c for c in node.childs() ]:
-                    c.set_custom("ids", ids)
-                    node.parent().append(c.detach(), before=node)
+        return tree
 
-        _traverse(tree)
-
-        # clean up the result and return it
-        return Processor._cleanup_tree(
-            node=tree,
-            transformer=lambda n: None if is_id(n) else n
-        )
 
     #
     def transform_remove_risks(self, tree):
@@ -896,9 +924,9 @@ class Processor:
     #
     def transform(self, tree):
         """ it applies transformations to the tree just before its reporting """
-        if (self._ids): tree = self.transform_ids(tree)
         if (self._modules): tree = self.transform_modules(tree)
         if (self._stages): tree = self.transform_stages(tree)
+        if (self._arrows): tree = self.transform_arrows(tree)
         if (not self._risks): tree = self.transform_remove_risks(tree)
         return tree
 
@@ -2069,7 +2097,6 @@ if __name__ == "__main__":
         help='''don't hide multiplier/visibility column, use it as a filter instead (doesn't work for LibreOffice)'''
     )
 
-    # TODO: implement me
     parser.add_argument(
         '--arrows',
         action='store_true',
