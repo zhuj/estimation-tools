@@ -191,9 +191,12 @@ class Node:
         self._estimations = copy.copy(node._estimations)
         self._estimates_cache = Node._estimates(self._estimations)
 
-    def set_custom(self, name, value, check=True):
+    def set_custom(self, name, value, check=True, error=lambda prev: None):
         v = getattr(self, '_custom_' + name, None)
         setattr(self, '_custom_' + name, value)
+        if (check and (v is not None)):
+            err = error(v)
+            if (err is not None): raise err
         return v
 
     def get_custom(self, name):
@@ -531,7 +534,7 @@ class Processor:
 
     # regexps patterns
     import re
-    RE_ESTIMATE = re.compile("estimate\\s*=(\\s*\\d+\\s*)[/](\\s*\\d+\\s*)[/](\\s*\\d+\\s*)")
+    RE_ESTIMATE = re.compile("estimate\\s*=(\\s*[0-9.]+\\s*)[/](\\s*[0-9.]+\\s*)[/](\\s*[0-9.]+\\s*)")
     RE_ANNOTATION = re.compile("^[[]([a-z0-9-]+)[]]\\s*(.*)")
 
     # annotation types
@@ -620,13 +623,13 @@ class Processor:
         self._volumes = getattr(options, Processor.OPT_VOLUMES, False) and True
         self._volumes_mul = self._volumes and float(getattr(options, Processor.OPT_VOLUMES_MUL, "0.0"))
         self._corrections = Processor._parse_role_factors(getattr(options, Processor.OPT_CORRECTIONS, None))
-        self._unpivot_tree = getattr(options, Processor.OPT_UNPIVOT_TREE, False) and True
+        self._unpivot_tree = getattr(options, Processor.OPT_UNPIVOT_TREE, 0)
         self._separate_footer = getattr(options, Processor.OPT_SEPARATE_FOOTER, False) and True
 
         if (self._stages):
             self._mvp = False
 
-        if (self._unpivot_tree):
+        if (self._unpivot_tree > 0):
             self._separate_footer = True
             self._roles = False
             self._formulas = False
@@ -736,10 +739,10 @@ class Processor:
 
             # then try to parse ids (regardless the parameter value)
             if (title and (title.startswith('{') and title.endswith('}'))):
-                title = title[1:-1]
-                def modifier(child, ids=title):
-                    prev = child.set_custom("ids", ids)
-                    if (prev is not None): raise Exception(parent, ids)
+                id_ids, id_sht = title[1:-1].partition(':')[::2]
+                def modifier(child, ids=id_ids.strip(), sht=id_sht.strip()):
+                    child.set_custom("id_ids", ids, error=lambda prev: Exception(parent, prev))
+                    child.set_custom("id_sht", sht, error=lambda prev: Exception(parent, prev))
                     return child
 
                 if (self._process(parent, xmlNode.childNodes, node_modifier=modifier) is not None):
@@ -751,8 +754,7 @@ class Processor:
             # then try to parse volumes (regardless the parameter value)
             if (title and (title.startswith('[[') and title.endswith(']]'))):
                 title = title[2:-2]
-                prev = parent.set_custom("volume", float(title))
-                if (prev is not None): raise Exception(parent, title)
+                parent.set_custom("volume", float(title), error=lambda prev: Exception(parent, prev))
                 parent._title += ", %s" % title
 
                 if (self._process(parent, xmlNode.childNodes) is not None):
@@ -879,6 +881,7 @@ class Processor:
             node=tree,
             transformer=lambda n: n
         )
+        return tree
 
     #
     def transform_modules(self, tree):
@@ -1053,31 +1056,37 @@ class Processor:
         _columns = ColumnWrapper._columns(apply_format = _apply_format)
 
         LEVELS = []
-        if (self._unpivot_tree):
+        if (self._unpivot_tree > 0):
             max_level = 0
             for l in lines:
                 if (l.is_role()): continue
-                if (not l.estimates()): continue
+                if (l.estimates() is None): continue
                 max_level = max(max_level, l.level())
 
-            LEVELS = [ (l, _columns.next()) for l in range(max_level) ]
+            max_level += 1
+            LEVELS = [ (l, 'Level %s' % (1 + l), _columns.next()) for l in range(max_level) ]
 
-        BI = _columns.next() if (self._ids) else NOCL                # ?: id
+            if (self._unpivot_tree >= 2):
+                LEVELS.append((-2, "Title (Reduced)", _columns.next()))
+                LEVELS.append((-1, "Title (Flat)", _columns.next()))
+
+        BI = _columns.next() if (self._ids) else NOCL                # ?: id: ids
+        BS = _columns.next() if (self._ids) else NOCL                # ?: id: short-title
         B0 = _columns.next()                                         # A: caption
         B1 = _columns.next()                                         # B: visibility
         B2 = _columns.next()                                         # C: empty/MVP/Stage
 
         S0 = _columns.next()                                         # D: structure1 (module, submodule, ...)
-        S1 = _columns.next() if (not self._unpivot_tree) else NOCL   # E: structure2 (...)
-        S2 = _columns.next() if (not self._unpivot_tree) else NOCL   # F: structure3 (...)
-        S3 = _columns.next() if (not self._unpivot_tree) else NOCL   # G: structure4 (...)
+        S1 = _columns.next() if (self._unpivot_tree <= 0) else NOCL  # E: structure2 (...)
+        S2 = _columns.next() if (self._unpivot_tree <= 0) else NOCL  # F: structure3 (...)
+        S3 = _columns.next() if (self._unpivot_tree <= 0) else NOCL  # G: structure4 (...)
 
         C0 = _columns.next()                                         # H: comment
 
         E0 = _columns.next()                                         # I: estimate-0
         E1 = _columns.next()                                         # J: estimate-1
         E2 = _columns.next()                                         # K: estimate-2
-        E3 = _columns.next() if (not self._unpivot_tree) else NOCL   # L: estimate-separator
+        E3 = _columns.next() if (self._unpivot_tree <= 0) else NOCL  # L: estimate-separator
         E4 = _columns.next()                                         # M: estimate-wm
         E5 = _columns.next()                                         # N: estimate-st
         E6 = _columns.next()                                         # O: estimate-sq
@@ -1092,11 +1101,12 @@ class Processor:
         # -------------
         # setup columns
 
-        for LI, LL in LEVELS:
+        for LI, LT, LL in LEVELS:
             LL.setup(ws, width=20, f=self._theme.F_DEFAULT)
 
         # setup columns: base columns
         BI.setup(ws, width=10, f=self._theme.F_DEFAULT)
+        BS.setup(ws, width=20, f=self._theme.F_DEFAULT)
         B0.setup(ws, width=50, f=self._theme.F_DEFAULT)
         B1.setup(ws, width=3,  f=self._theme.F_MULTIPLIER)
         B2.setup(ws, width=8,  f=self._theme.F_COMMENT)
@@ -1140,6 +1150,9 @@ class Processor:
             V0.hide(ws, hidden=True)
             V1.hide(ws, hidden=True)
 
+        # hide ids_sht for unpivot >= v2
+        if (self._unpivot_tree >= 2):
+            BS.hide(ws, hidden=True)
 
         # start rows
         row = 0
@@ -1149,11 +1162,12 @@ class Processor:
         f_header = self._theme.F_HEADER
 
         # header: levels
-        for LI, LL in LEVELS:
-            LL.string(ws, row, 'Level %s' % (1 + LI), f_header) # LL: level
+        for LI, LT, LL in LEVELS:
+            LL.string(ws, row, LT, f_header) # LL: level
 
         # header: fixed columns
-        BI.string(ws, row, 'IDs', f_header)             # BI: IDs
+        BI.string(ws, row, 'IDs', f_header)             # BI: ID: IDs
+        BS.string(ws, row, 'Title (Short)', f_header)   # BS: ID: Short title
         B0.string(ws, row, 'Task / Subtask', f_header)  # B0: caption
         B1.string(ws, row, 'Filter', f_header)          # B1: visibility
         B2.string(ws, row, '', f_header)                # B2: empty/MVP/Stage
@@ -1249,7 +1263,7 @@ class Processor:
             estimates = l.estimates()
 
             # unpivot mode has to hide all axillary rows
-            if (self._unpivot_tree):
+            if (self._unpivot_tree > 0):
                 if (estimates is None):
                     continue
 
@@ -1267,12 +1281,14 @@ class Processor:
                     dv_mvp_empty.ranges.append(cells(B2, (row, row)))
 
             # levels, if exists
-            for LI, LL in LEVELS:
-                p = l.parent(level=LI)
-                if (p.level() == LI):
-                    LL.string(ws, row, p.title()) # LL: level
-                else:
-                    LL.blank(ws, row) # LL: level
+            for LI, LT, LL in LEVELS:
+                if (LI >= 0):
+                    if ((self._unpivot_tree < 2) or (LI < l.level())):
+                        p = l.parent(level=LI)
+                        if (p.level() == LI):
+                            LL.string(ws, row, p.title()) # LL: level
+                            continue
+                LL.blank(ws, row) # LL: level
 
             # ----------------------
             # special case for roles (they are just info rows)
@@ -1323,9 +1339,24 @@ class Processor:
             # '' means that it's a role (don't use it in total numbers - use aggregated estimations)
             multiplier = (not role) and (estimates is not None)
 
+            # prepare id-related data
+            row_id_ids = l.acquire_custom('id_ids') if (self._unpivot_tree > 0) else l.get_custom('id_ids')
+            row_id_sht = l.acquire_custom('id_sht') if (self._unpivot_tree > 0) else l.get_custom('id_sht')
+
+            if (self._unpivot_tree >= 2):
+                row_short_title = row_id_sht or l.title()
+                if (len(row_short_title) > 40):
+                    print "Title is too long:", row_id_ids, row_short_title
+                    row_short_title = row_short_title[0:37] + "..."
+                LEVELS[-2][-1].string(ws, row, row_short_title, f_row) # short title
+                LEVELS[-1][-1].string(ws, row, l.title(), f_row)       # flat title
+
+            elif (self._unpivot_tree > 0):
+                row_id_sht = row_id_sht or l.title()
+
             # let's fill the row with data
-            ids = l.acquire_custom('ids') if (self._unpivot_tree) else l.get_custom('ids')
-            BI.string(ws, row, ids, f_row, f_comment)                                  # BI (IDs)
+            BI.string(ws, row, row_id_ids, f_row, f_comment)                           # BI (IDs: id)
+            BS.string(ws, row, row_id_sht, f_row, f_comment)                           # BS (IDs: short title)
             B0.string(ws, row, l.title_with_level(), f_row)                            # B0 (title)
             B1.blank(ws, row, f_row, f_multiplier)                                     # B1 (visibility/multiplier)
             B2.blank(ws, row, f_row)                                                   # B2 (empty/MVP/Stage)
@@ -1402,7 +1433,7 @@ class Processor:
 
                 # write write to document
                 f_row = l._f_row
-                if (l.estimates()):
+                if (l.estimates() is not None):
                     E0.formula(ws, l_row, template.replace('#', str(E0)), f_row, f_estimates)  # E0 (estimate)
                     E1.formula(ws, l_row, template.replace('#', str(E1)), f_row, f_estimates)  # E1 (estimate)
                     E2.formula(ws, l_row, template.replace('#', str(E2)), f_row, f_estimates)  # E2 (estimate)
@@ -1455,7 +1486,7 @@ class Processor:
             R0.setup(ws, width=3,  f=self._theme.F_DEFAULT)
 
             # hide pivot
-            for LI, LL in LEVELS:
+            for LI, LT, LL in LEVELS:
                 LL.hide(ws, hidden=True)
 
             # header: fixed columns
@@ -1479,6 +1510,7 @@ class Processor:
 
             # hide visibility if required
             BI.hide(ws, hidden=True)
+            BS.hide(ws, hidden=True)
             B1.hide(ws, hidden=True)
 
             # hide structure columns
@@ -1777,7 +1809,7 @@ class Processor:
             R0.setup(ws, width=3,  f=self._theme.F_DEFAULT)
 
             # hide pivot
-            for LI, LL in LEVELS:
+            for LI, LT, LL in LEVELS:
                 LL.hide(ws, hidden=True)
 
             # header: fixed columns
@@ -1800,6 +1832,7 @@ class Processor:
 
             # hide visibility if required
             BI.hide(ws, hidden=True)
+            BS.hide(ws, hidden=True)
             B1.hide(ws, hidden=True)
 
             # hide structure columns
@@ -1893,7 +1926,7 @@ class Processor:
             R0.setup(ws, width=3,  f=self._theme.F_DEFAULT)
 
             # hide pivot
-            for LI, LL in LEVELS:
+            for LI, LT, LL in LEVELS:
                 LL.hide(ws, hidden=True)
 
             # header: fixed columns
@@ -1916,6 +1949,7 @@ class Processor:
 
             # hide visibility if required
             BI.hide(ws, hidden=True)
+            BS.hide(ws, hidden=True)
             B1.hide(ws, hidden=True)
 
             # hide structure columns
@@ -2148,10 +2182,18 @@ if __name__ == "__main__":
 
     # experimental
     parser.add_argument(
-        '--unpivot-tree',
-        action='store_true',
+        '--unpivot-tree-v1',
+        action='store_const', const=1,
         dest=Processor.OPT_UNPIVOT_TREE,
-        help='''show hierarchy columns (level by level) before the table items (it turns off the header and features as roles, formulas, ...)'''
+        help='''show hierarchy columns (level by level) before the table items (it turns off the header and features as roles, formulas, ...) - V1'''
+    )
+
+    # experimental
+    parser.add_argument(
+        '--unpivot-tree-v2', '--unpivot-tree',
+        action='store_const', const=2,
+        dest=Processor.OPT_UNPIVOT_TREE,
+        help='''show hierarchy columns (level by level) before the table items (it turns off the header and features as roles, formulas, ...) - V2'''
     )
 
     # experimental
