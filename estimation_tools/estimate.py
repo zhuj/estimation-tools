@@ -153,7 +153,9 @@ class Node:
         return None
 
     def mvp_minus(self):
-        return len(self.annotation('mvp-')) > 0
+        if (len(self.annotation('mvp-')) > 0): return True
+        if (self._parent is not None): return self._parent.mvp_minus()
+        return False
 
     def estimate(self, role, numbers):
 
@@ -814,11 +816,12 @@ class Processor:
     def transform_stages(self, tree):
         """ it extracts stages (from annotations) and rearrange nodes according their stages """
 
-        # setup default "Stage 0"
+        # setup default "Stage 0", highlight risks
 
-        lines = [ l for l in tree.childs() if l.annotation('stage') is None ]
-        for l in lines: l.annotaion('stage', '0')
-        del lines
+
+        for l in tree.childs(): # direct childs of the tree root (first level elements)
+            if len(l.annotation('stage')) == 0: 
+                l.annotation('stage', '0')
 
         # let's get started
 
@@ -836,6 +839,9 @@ class Processor:
 
         lines = Processor._collect(tree)
         lines = [ l for l in lines if (not l.is_role()) ]
+
+        for l in lines:
+            if "*" in l.annotation("risk"): l.annotation('stage', 'risks')
 
         # collect data by annotation and by nodes together
         lines = (
@@ -918,7 +924,6 @@ class Processor:
     #
     def transform_remove_risks(self, tree):
         """ removes all risks from result estimates """
-
         return Processor._cleanup_tree(
             node=tree,
             transformer=lambda n: None if (("*" in n.annotation('risk')) or ("risks" in n.annotation('stage'))) else n
