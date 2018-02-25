@@ -35,6 +35,30 @@ except:
     pass
 
 
+
+# magic
+def magic_split(s):
+    part, tp = '', None
+    for c in s:
+        d = c.isdigit()
+        if (tp is None):
+            tp = d
+        elif (tp != d):
+            if (tp is True): part = int(part)
+            yield part
+            part = ''
+            tp = d
+        part += c 
+
+    if (tp is True): part = int(part)
+    yield part
+
+def magic_compare(a, b):
+    return cmp(
+        [ x for x in magic_split(a) ],
+        [ x for x in magic_split(b) ]
+    )
+
 # estimatuion (contains set of numbers)
 class Estimation:
     """Estimation is a set of numbers (min <= real <= max) which describes a range for time requirement."""
@@ -1315,11 +1339,21 @@ class Processor:
                 S2.string(ws, row, '', f_role)                            # S2 (comment)
                 S3.string(ws, row, '', f_role)                            # S3 (comment)
                 C0.string(ws, row, '', f_role)                            # C0 (comment)
+
                 if (estimates is not None):
                     E0.number(ws, row, estimates[0], f_role)              # E0 (estimate)
                     E1.number(ws, row, estimates[1], f_role)              # E1 (estimate)
                     E2.number(ws, row, estimates[2], f_role)              # E2 (estimate)
 
+                # modules
+                if (self._modules):
+                    module = _module_to_string(l)
+                    modules.add(module)
+                    f_row_x = f_row if (estimates is not None) else f_role
+                    S0.string(ws, row, module, f_row_x) # S0 (Module, all rows)
+
+                # stage
+                # stage
                 if (self._stages):
                     stage = _stage_to_string(l)
                     if (not stage): stage = "(?)"
@@ -1579,7 +1613,7 @@ class Processor:
             E2.formula(ws, row_footer, '=SUMIFS(%s%s,%s)' % (prefix, cells(E2, row_lines), row_criteria), f_total, f_estimates)  # E2 (sum)
             E4.formula(ws, row_footer, '=(%s+4*%s+%s)/6' % (cell(E0, row_footer), cell(E1, row_footer), cell(E2, row_footer)), f_total, f_estimates) # E4 (local,total)
             if (total_cell):
-                E5.formula(ws, row_footer, '=(%s/%s)' % (cell(E4, row_footer), total_cell), f_total, f_percentage)         # E5 (%)
+                E5.formula(ws, row_footer, '=IF(%s>0, %s/%s, 0)' % (total_cell, cell(E4, row_footer), total_cell), f_total, f_percentage)         # E5 (%)
                 R0.formula(ws, row_footer, '=IF(%s>0, 1, 0)' % (cell(E5, row_footer)), f_boolean)                          # R0
             if (sd):
                 E6.formula(ws, row_footer, '=SUMIFS(%s%s,%s)' % (prefix, cells(E6, row_lines), row_criteria), f_total, f_estimates)           # E6 (sum,sd)
@@ -1634,7 +1668,7 @@ class Processor:
 
             # total (stage) values
             stages = list(stages)
-            stages.sort()
+            stages.sort(magic_compare)
             for stage in stages:
 
                 row_footer += 1
@@ -1660,7 +1694,7 @@ class Processor:
 
             # total (module) values
             modules = list(modules)
-            modules.sort()
+            modules.sort(magic_compare)
             for module in modules:
                 row_footer += 1
                 row_footer = _partial(
@@ -1684,7 +1718,7 @@ class Processor:
         def _sigma(row_sigma, row_total):
             B0.string(ws, row_sigma, 'Standard deviation', f_caption)                     # B0 (caption)
             B2.formula(ws, row_sigma, '=SQRT(%s)' % (cell(E6, row_total)), f_estimates)   # B2 (sigma)
-            C0.formula(ws, row_sigma, '=%s/%s' % (cell(B2, row_sigma), cell(E4, row_total)), f_percentage)     # C0 (sigma,percentage)
+            C0.formula(ws, row_sigma, '=IF(%s>0, %s/%s, 0)' % (cell(E4, row_total), cell(B2, row_sigma), cell(E4, row_total)), f_percentage)     # C0 (sigma,percentage)
             return row_sigma
 
         row_footer += 1
@@ -1796,7 +1830,6 @@ class Processor:
 
         # -----------------------
         # Stages & Modules report
-
         if (self._stages and self._modules and len(stages) > 1 and len(modules) > 1):
 
             ws_matrix = ws = wb.create_sheet("StagesAndModules")
@@ -1853,7 +1886,7 @@ class Processor:
 
             for stage in stages:
 
-                s_lines = [ l for l in lines if _stage_to_string(l) == stage ]
+                s_lines = [ l for l in lines if _stage_to_string(l) == stage and l.estimates() is not None]
                 if (self._hide_empty):
                     # TODO: don't remove but hide the block
                     if (not s_lines): continue
@@ -1888,7 +1921,7 @@ class Processor:
                     if (self._hide_empty):
                         if (not s_lines): _hide_row(ws, row_footer, hidden=True)
                         else:
-                            m_lines = [ l for l in s_lines if _module_to_string(l) == module if l.estimates() is not None ]
+                            m_lines = [ l for l in s_lines if _module_to_string(l) == module and l.estimates() is not None ]
                             if (not m_lines): _hide_row(ws, row_footer, hidden=True)
 
 
@@ -1970,7 +2003,7 @@ class Processor:
 
             for stage in stages:
 
-                s_lines = [ l for l in lines if _stage_to_string(l) == stage ]
+                s_lines = [ l for l in lines if _stage_to_string(l) == stage and l.estimates() is not None ]
                 if (self._hide_empty):
                     # TODO: don't remove but hide the block
                     if (not s_lines): continue
@@ -2005,7 +2038,7 @@ class Processor:
                     if (self._hide_empty):
                         if (not s_lines): _hide_row(ws, row_footer, hidden=True)
                         else:
-                            r_lines = [ l for l in s_lines if l.is_role() and l.title() == role if l.estimates() is not None ]
+                            r_lines = [ l for l in s_lines if l.is_role() and l.title() == role and l.estimates() is not None ]
                             if (not r_lines): _hide_row(ws, row_footer, hidden=True)
 
                 # sigma: standard deviation
@@ -2028,6 +2061,122 @@ class Processor:
                 row_footer += 1
 
 
+        # -----------------------
+        # Modules & Roles report
+        if (self._modules and self._roles and len(modules) > 1 and len(roles) > 1):
+
+            ws_matrix = ws = wb.create_sheet("ModulesAndRoles")
+
+            # columns
+            B0.setup(ws, width=50, f=self._theme.F_DEFAULT)
+            C0.setup(ws, width=50, f=self._theme.F_COMMENT)
+            E0.setup(ws, width=8,  f=self._theme.F_NUMBERS)
+            E1.setup(ws, width=8,  f=self._theme.F_NUMBERS)
+            E2.setup(ws, width=8,  f=self._theme.F_NUMBERS)
+            E3.setup(ws, width=4,  f=self._theme.F_DEFAULT)
+            E4.setup(ws, width=8,  f=self._theme.F_NUMBERS)
+            E5.setup(ws, width=8,  f=self._theme.F_NUMBERS)
+            E6.setup(ws, width=8,  f=self._theme.F_NUMBERS)
+            R0.setup(ws, width=3,  f=self._theme.F_DEFAULT)
+
+            # hide pivot
+            for LI, LT, LL in LEVELS:
+                LL.hide(ws, hidden=True)
+
+            # header: fixed columns
+            row = 0
+            B0.string(ws, row, '', f_header)                # B0: caption
+            B1.string(ws, row, '', f_header)                # B1: visibility
+            B2.string(ws, row, '', f_header)                # B2: empty/MVP/Stage
+            S0.string(ws, row, '', f_header)                # S0: structure (module, submodule, ....)
+            S1.string(ws, row, '', f_header)                # S1: structure
+            S2.string(ws, row, '', f_header)                # S2: structure
+            S3.string(ws, row, '', f_header)                # S3: structure
+            C0.string(ws, row, '', f_header)                # C0: comment
+            E0.string(ws, row, 'Min', f_header)             # E0: estimate
+            E1.string(ws, row, 'Real', f_header)            # E1: estimate
+            E2.string(ws, row, 'Max', f_header)             # E2: estimate
+            E3.string(ws, row, '', f_header)                # E3: empty
+            E4.string(ws, row, 'Avg', f_header)             # E4: weighted mean
+            E5.string(ws, row, '%', f_header)               # E5: standard deviation
+            E6.string(ws, row, 'Sq', f_header)              # E6: squared deviation
+
+            # hide visibility if required
+            BI.hide(ws, hidden=True)
+            BS.hide(ws, hidden=True)
+            B1.hide(ws, hidden=True)
+
+            # hide structure columns
+            S1.hide(ws, hidden=True)
+            S2.hide(ws, hidden=True)
+            S3.hide(ws, hidden=True)
+
+            # hide role column
+            R0.hide(ws, hidden=True)
+
+            # footer
+            row_footer = row+1
+
+            for module in modules:
+
+                m_lines = [ l for l in lines if _module_to_string(l) == module and l.estimates() is not None ]
+                if (self._hide_empty):
+                    # TODO: don't remove but hide the block
+                    if (not m_lines): continue
+
+                row_footer += 1
+                row_module = row_footer = _partial(
+                    row_footer=row_footer,
+                    caption=' - %s' % (('Module «%s»' % module) if module else "Common"),
+                    row_criteria='%s!%s,"=1",%s!%s,"%s"' % (
+                        ws_estimates.title, cells(B1, row_lines),
+                        ws_estimates.title, cells(S0, row_lines), module
+                    ),
+                    total_cell='%s!%s' % (ws_footer.title, cell(E4, row_total)),
+                    f_total=f_final,
+                    sd=True
+                )
+
+                for role in roles:
+
+                    row_footer += 1
+                    row_footer = _partial(
+                        row_footer=row_footer,
+                        caption='  - %s' % role.strip('()'),
+                        row_criteria='%s!%s,"=0",%s!%s,"%s",%s!%s,"%s"' % (
+                            ws_estimates.title, cells(B1, row_lines),
+                            ws_estimates.title, cells(S0, row_lines), module,
+                            ws_estimates.title, cells(R0, row_lines), role
+                        ),
+                        total_cell='%s!%s' % (ws_matrix.title, cell(E4, row_module))
+                    )
+
+                    if (self._hide_empty):
+                        if (not m_lines): _hide_row(ws, row_footer, hidden=True)
+                        else:
+                            r_lines = [ l for l in m_lines if l.is_role() and l.title() == role and l.estimates() is not None ]
+                            if (not r_lines): _hide_row(ws, row_footer, hidden=True)
+
+
+                # sigma: standard deviation
+                row_footer += 1
+                row_sigma = _sigma(row_footer, row_total=row_module)
+
+                # Min (P=95/99%)
+                row_footer += 1
+                row_footer = _final(row_footer, row_total=row_module, row_sigma=row_sigma, sign="-")
+
+                # Max (P=95/99%)
+                row_footer += 1
+                row_footer = _final(row_footer, row_total=row_module, row_sigma=row_sigma, sign="+")
+
+                # TODO: filter (make it work with Excel Online)
+                ws.auto_filter.ref = '%s:%s' % (cell('A', 0), cell(R0, row_footer))
+                ws.auto_filter.add_filter_column(R0.index(), ['1'], blank=True)
+
+                # yet another empty
+                row_footer += 1
+
 
         return row_lines
 
@@ -2041,9 +2190,8 @@ class Processor:
         return wb
 
 
-# let's dance
-if __name__ == "__main__":
-  def main():
+# argument parser
+def parse_arguments():
     import argparse
 
     parser = argparse.ArgumentParser(
@@ -2229,7 +2377,13 @@ if __name__ == "__main__":
         help='''a freemind (mindmap) file to be converted'''
     )
 
-    options = parser.parse_args()
+    return parser.parse_args()
+
+# let's dance
+if __name__ == "__main__":
+  def main():
+
+    options = parse_arguments()
     filename = options.filename
 
     processor = Processor(options)
