@@ -570,9 +570,18 @@ class Processor:
         'todo': ('comment', ''),
         'impl': ('comment', ''),
 
-        'mvp-': ('mvp-', '*'),
-        'api+': ('api+', '*'),
-        'risk': ('risk', '*'),
+        'guess': ('assumption', ''),       # restriction (inclusive) for the estimation
+        'assume': ('assumption', ''),      # restriction (inclusive) for the estimation
+        'suppose': ('assumption', ''),     # restriction (inclusive) for the estimation
+        'assumption': ('assumption', ''),  # restriction (inclusive) for the estimation
+
+        'oos': ('oos', '*'),               # restriction (exclusive)
+        'out of scope': ('oos', '*'),      # restriction (exclusive)
+        'out-of-scope': ('oos', '*'),      # restriction (exclusive)
+
+        'mvp-': ('mvp-', '*'), # is not MVP
+        'api+': ('api+', '*'), # is a common block (API, Architecture, ...)
+        'risk': ('risk', '*'), # is a risk (should not happen, but estimated)
 
         'stage': ('stage', ''),
         'phase': ('stage', ''),
@@ -798,8 +807,8 @@ class Processor:
                 parent.append(node)
                 required = 1
 
-        if (required): return parent
-        return None
+        # ORIG: if (not required): return None
+        return parent # it will be filtered later
 
     #
     def parse(self, path):
@@ -826,11 +835,12 @@ class Processor:
 
         if (node.is_role()): return node
         if (node.estimates() is not None): return node
+        if ('*' in node.annotation('oos')): return node
 
         childs = [ Processor._cleanup_tree(c, transformer) for c in node._childs ]
         childs = [ c for c in childs if c is not None ]
 
-        if (len(childs) > 0):
+        if ((len(childs) > 0) or (node.level() == 0)):
             node._childs = childs
             return node
 
@@ -848,7 +858,23 @@ class Processor:
                 l.annotation('stage', '0')
 
         # let's get started
+        lines = Processor._collect(tree)
+        lines = [ l for l in lines if (not l.is_role()) ]
 
+        # specify reserved stages for annotated elements
+        for l in lines:
+            if ("*" in l.annotation("oos")): l.annotation('stage', 'out-of-scope')
+            elif ("*" in l.annotation("risk")): l.annotation('stage', 'risks')
+
+        # collect data by annotation and by node title together
+        lines = (
+            [ ( l, s.strip() ) for l in lines for s in l.annotation('stage') ] + 
+            [ ( l, l.title().replace('Stage ', '', 1).strip() ) for l in lines if (l.estimates() is None) and (l.title().startswith('Stage ')) ]
+        )
+
+        lines = [ ( l, (sl, ) ) for (l, sl) in lines if (sl) ]
+
+        # introduce node cache (to add auxiliary nodes by paths only once)
         _node_cache = {}
         def _add_node(path, caption=lambda x:x[-1]):
             if (not path): return tree
@@ -861,29 +887,14 @@ class Processor:
             _node_cache[path] = e
             return e
 
-        lines = Processor._collect(tree)
-        lines = [ l for l in lines if (not l.is_role()) ]
-
-        for l in lines:
-            if "*" in l.annotation("risk"): l.annotation('stage', 'risks')
-
-        # collect data by annotation and by nodes together
-        lines = (
-            [ ( l, s.strip() ) for l in lines for s in l.annotation('stage') ] + 
-            [ ( l, l.title().replace('Stage ', '', 1).strip() ) for l in lines if (l.estimates() is None) and (l.title().startswith('Stage ')) ]
-        )
-
-        lines = [ ( l, (sl, ) ) for (l, sl) in lines if (sl) ]
-
-        # TODO: think about: lines.reverse() 
+        # TODO: think about: lines.reverse()
         # TODO: make it backward hierarchy sorted
-
         # append stages first in a right order
         stages = [ sl for (l, sl) in lines ]
         stages = list(set( stages ))
         stages.sort()
         for sl in stages:
-            s = _add_node(path=sl, caption=lambda x:'Stage %s' % '.'.join(x))
+            s = _add_node(path=sl, caption=lambda tr:'Stage %s' % '.'.join([ (x if (x and x[0].isdigit()) else ('"%s"' % x.capitalize())) for x in tr ]))
             s.set_custom("stage", sl)
         del stages
 
@@ -911,7 +922,6 @@ class Processor:
             node=tree,
             transformer=lambda n: n
         )
-        return tree
 
     #
     def transform_modules(self, tree):
@@ -940,7 +950,7 @@ class Processor:
         for line in lines:
             for id in line.annotation("dependency_ids"):
                 for dep in id_to_node[id]:
-                    line.annotation( "comment", "Requires: " + " / ".join(n.title() for n in dep.trace([tree])) )
+                    line.annotation( 'comment', "Requires: " + " / ".join(n.title() for n in dep.trace([tree])) )
 
         return tree
 
@@ -954,12 +964,22 @@ class Processor:
         )
 
     #
+    def transform_remove_oos(self, tree):
+        """ removes all out-of-scope from result estimates """
+        return Processor._cleanup_tree(
+            node=tree,
+            transformer=lambda n: None if (("*" in n.annotation('oos')) or ("out-of-scope" in n.annotation('stage'))) else n
+        )
+
+    #
     def transform(self, tree):
         """ it applies transformations to the tree just before its reporting """
         if (self._modules): tree = self.transform_modules(tree)
         if (self._stages): tree = self.transform_stages(tree)
         if (self._arrows): tree = self.transform_arrows(tree)
-        if (not self._risks): tree = self.transform_remove_risks(tree)
+        if (not self._risks):
+            tree = self.transform_remove_oos(tree)
+            tree = self.transform_remove_risks(tree)
         return tree
 
     #
@@ -1222,6 +1242,9 @@ class Processor:
         # ------------------------
         # prepare data validation
 
+        dv_mul_list = []
+        dv_mvp_list = []
+        dv_mvp_empty = []
         if (self._validation):
 
             AZ = ColumnWrapper(index=ColumnWrapper._index("AZ"), apply_format=_apply_format)
@@ -1349,7 +1372,7 @@ class Processor:
                 if (self._modules):
                     module = _module_to_string(l)
                     modules.add(module)
-                    f_row_x = f_row if (estimates is not None) else f_role
+                    f_row_x = None if (estimates is not None) else f_role
                     S0.string(ws, row, module, f_row_x) # S0 (Module, all rows)
 
                 # stage
@@ -1490,6 +1513,7 @@ class Processor:
         # ----------------------------------
         # calculate ranges & apply filtering
         row_lines = row_lines.values()
+        if (len(row_lines) == 0): row_lines = [ row_footer ]
         row_lines = (min(row_lines), max(max(row_lines), row_footer))
 
         # data validation (multiplier/filter and mvp, if enabled)
@@ -2176,6 +2200,14 @@ class Processor:
 
                 # yet another empty
                 row_footer += 1
+
+        # --------------------------------
+        # assumptions, risks, out of scope
+
+        # TODO: collect out-of-scope separately
+        # ws_matrix = ws = wb.create_sheet("Scope")
+
+
 
 
         return row_lines
