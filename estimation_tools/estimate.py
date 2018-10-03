@@ -754,6 +754,7 @@ class Processor:
                         estimates = [ e*f for e in estimates ]
 
                     # store the result into the main node (total estimation node)
+                    if (parent.parent().is_role()): raise Exception("Check your document structure: there should not be roles-in-roles")
                     parent.parent().estimate(role, estimates)
 
                 parent.estimate(None, estimates) # (always) set the estimation for node itself
@@ -807,8 +808,8 @@ class Processor:
                 parent.append(node)
                 required = 1
 
-        # ORIG: if (not required): return None
-        return parent # it will be filtered later
+        if (not required): return None
+        return parent
 
     #
     def parse(self, path):
@@ -958,17 +959,40 @@ class Processor:
     #
     def transform_remove_risks(self, tree):
         """ removes all risks from result estimates """
+
+        def is_risk(node):
+
+            if ("*" in node.annotation('risk')): return True
+
+            stages = [ s.lower() for s in node.annotation('stage') ]
+            if ("risks" in stages): return True
+            if ("risk" in stages): return True
+
+            return False
+
         return Processor._cleanup_tree(
             node=tree,
-            transformer=lambda n: None if (("*" in n.annotation('risk')) or ("risks" in n.annotation('stage'))) else n
+            transformer=lambda n: None if is_risk(n) else n
         )
 
     #
     def transform_remove_oos(self, tree):
         """ removes all out-of-scope from result estimates """
+
+        def is_oos(node):
+
+            if ("*" in node.annotation('oos')): return True
+
+            stages = [ s.lower() for s in node.annotation('stage') ]
+            if ("out-of-scope" in stages): return True
+            if ("out of scope" in stages): return True
+
+            return False
+
+
         return Processor._cleanup_tree(
             node=tree,
-            transformer=lambda n: None if (("*" in n.annotation('oos')) or ("out-of-scope" in n.annotation('stage'))) else n
+            transformer=lambda n: None if is_oos(n) else n
         )
 
     #
